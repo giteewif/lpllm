@@ -5,6 +5,7 @@ from .modeling_deepseek import DeepseekDecoderLayer, DeepseekRMSNorm
 from .modeling_deepseek import apply_rotary_pos_emb, repeat_kv
 import json
 import torch
+import math
 from transformers.modeling_attn_mask_utils import (
     AttentionMaskConverter,
     _prepare_4d_attention_mask,
@@ -42,7 +43,6 @@ class Deepseek(Base, nn.Module):
         self.embed_tokens=embed_tokens
         self.norm=norm
         
-        # print(embed_tokens.weight.dtype)
     def get_others(self, config: DeepseekConfig, path):
         weight_tensor=self.load_others_tensor(path)
         embed_tokens=nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
@@ -121,7 +121,6 @@ class Deepseek(Base, nn.Module):
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, layer.self_attn.layer_idx)
-        # print(kv_seq_len, query_states.shape)
         cos, sin = layer.self_attn.rotary_emb(value_states, seq_len=kv_seq_len)
         
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
@@ -218,13 +217,10 @@ class Deepseek(Base, nn.Module):
         hidden_size=layer.self_attn.hidden_size
         attention_dropout = 0
         
-        # print(f"layer_idx {layer.layer_idx} before kv", key_states.shape, value_states.shape)
         time_past_key_value=time.time()
         if past_key_value is not None:
             cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, layer.layer_idx, cache_kwargs)
-        # print(f"kv after device", key_states.shape, value_states.shape)
-        print(f"past_key_value cost {time.time()-time_past_key_value}")
         
         key_states = repeat_kv(key_states, num_key_value_groups)
         value_states = repeat_kv(value_states, num_key_value_groups)
@@ -240,15 +236,9 @@ class Deepseek(Base, nn.Module):
             is_causal=is_causal and attention_mask is None and q_len > 1,
         )
         
-        # print(f"shape of query_states {query_states.shape} \
-        #         shape of key_states {key_states.shape} \
-        #         shape of value_states {value_states.shape} \
-        #         shape of attn_output {attn_output.shape} \
-        #         scaled_dot_product_attention cost {time.time()-time_start}")
         
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, hidden_size)
-        
         return attn_output
     
     def attn_compute_route(
@@ -285,7 +275,6 @@ class Deepseek(Base, nn.Module):
     ):
         # layer_norm here
         hidden_states = layer.input_layernorm(hidden_states)
-        # print(f"layernorm cost {time.time()-time_start}")
         if output_attentions:
             raise ValueError(
                 "DeepseekModel is using DeepseekSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
@@ -313,7 +302,7 @@ class Deepseek(Base, nn.Module):
             "past_key_value": past_key_value
         }
         return attn_inputs
-    def attn_compute_concurrent(
+    def attn_compute_queue(
         self,
         attn_inputs,
         io_queue,
@@ -326,6 +315,58 @@ class Deepseek(Base, nn.Module):
             attn_inputs=attn_inputs
         )
         # print(f"move_and_attn cost {time.time()-time_start}")
+        return None, past_key_value
+    
+    def attn_compute_concurrent(
+        self,
+        layer,
+        hidden_states,
+        attention_mask,
+        position_ids,
+        past_key_value,
+        output_attentions,
+        use_cache,
+        io_queue,
+        out_queue,
+    ):
+        # layer_norm here
+        hidden_states = layer.input_layernorm(hidden_states)
+          
+        if output_attentions:
+            raise ValueError(
+                "DeepseekModel is using DeepseekSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
+                'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
+            )
+        bsz, q_len, _ = hidden_states.size()
+        layer_device=layer.self_attn.q_proj.weight.device
+        # should compute on gpu
+        (q,k,v,s,c) = self.qkv_compute(
+            layer=layer,
+            hidden_states=hidden_states,
+            position_ids=position_ids,
+            past_key_value=past_key_value,
+            output_attentions=output_attentions
+        )
+        
+        # print(f"qkv compute cost {time.time()-time_start}")
+        attn_inputs={
+            "bsz": bsz,
+            "q_len": q_len,
+            "layer": layer,
+            "query_states": q,
+            "key_states": k,
+            "value_states": v,
+            "sin": s, "cos": c,
+            "attention_mask": attention_mask,
+            "past_key_value": past_key_value
+        }
+        
+        self.move_and_attn(
+            io_queue,
+            out_queue,
+            attn_inputs=attn_inputs
+        )
+        
         return None, past_key_value
         
     def attn_compute(
@@ -401,6 +442,7 @@ class Deepseek(Base, nn.Module):
         layer,
         hidden_states,
         o_hidden_states,
+        attn_queue_map=None
     ):
         # print(f"start call mlpc {time.time()}")
         residual=hidden_states
@@ -416,7 +458,7 @@ class Deepseek(Base, nn.Module):
         
         # get_gpu_memory_usage("mlpc before mlp")
         # print(f"start mlp {time.time()}")
-        hidden_states=layer.mlp(hidden_states)
+        hidden_states=layer.mlp(hidden_states, attn_queue_map=attn_queue_map)
         # print(f"end mlp {time.time()}")
         # get_gpu_memory_usage("mlpc after mlp")/
         
@@ -544,6 +586,63 @@ class Deepseek(Base, nn.Module):
     def load_weight2layer_general(self, layer, layer_idx, layer_state_dict):        
         layer.load_state_dict(layer_state_dict, strict=True)
         layer.layer_idx = layer_idx
+
+    def load_layers_tensor_general_pin(self, path, pool_tensor_bytes):
+        config = DeepseekConfig.from_pretrained(path)
+        
+        index_path = path + "/model.safetensors.index.json"
+        with open(index_path, "r") as f:
+            index = json.load(f)
+            weight_map = index["weight_map"]
+        # total_size_kb = 4*1024*1024
+        layers_state_dict = {}
+        
+        # 提前打开weight_map value 指向的所有safetensors 文件
+        weight_files = {}
+        for value in set(weight_map.values()):
+            weight_files[value] = safe_open(f"{path}/{value}", framework="pt", device="cpu")
+
+        start = 0
+        offset = 0
+        time_cpy = 0
+        times = 0
+        time_all = 0
+        time_all_time = time.time()
+        for key, value in weight_map.items():
+            # 提取层索引
+            if key.startswith("model.layers."):
+            # if key.startswith("model.layers.1.") or key.startswith("model.layers.2."):
+
+                time_start_all = time.time()
+                ksplits = key.split(".")
+                layer_index = int(ksplits[2])
+                
+                if layer_index not in layers_state_dict:
+                    layers_state_dict[layer_index] = {}
+
+                weight_file = weight_files[value]
+                tensor = weight_file.get_tensor(key)
+
+                tshape=tensor.shape
+                tensor_numel = tensor.numel()
+                offset = tensor_numel
+                # print(tensor_numel, tensor.view(-1).numel(), start)
+
+                pin_tensor = pool_tensor_bytes[start:start+offset].view(*tshape)
+            
+                time_start_copy = time.time()
+                pin_tensor.copy_(tensor, non_blocking=True)
+                time_cpy += time.time()-time_start_copy
+                times = times + 1
+
+                # tensor = tensor.pin_memory()
+                layer_key = ".".join(ksplits[3:])
+                layers_state_dict[layer_index][layer_key] = pin_tensor
+                start += offset
+                time_all += time.time()-time_start_all
+        print(f"cpy time avg {time_cpy/times} all avg {time_all/times} times {times} all {time.time()-time_all_time}")
+        layers_state_dict["pool"] = pool_tensor_bytes
+        return layers_state_dict
         
     def load_layers_tensor_general(self, path):
         config = DeepseekConfig.from_pretrained(path)
@@ -552,7 +651,7 @@ class Deepseek(Base, nn.Module):
         with open(index_path, "r") as f:
             index = json.load(f)
             weight_map = index["weight_map"]
-        
+            total_size = index["metadata"]["total_size"]
         layers_state_dict = {}
         
         # 提前打开weight_map value 指向的所有safetensors 文件
@@ -570,6 +669,7 @@ class Deepseek(Base, nn.Module):
 
                 weight_file = weight_files[value]
                 tensor = weight_file.get_tensor(key)
+                # tensor = tensor.pin_memory()
                 layer_key = ".".join(ksplits[3:])
                 layers_state_dict[layer_index][layer_key] = tensor
         return layers_state_dict
@@ -603,7 +703,7 @@ class Deepseek(Base, nn.Module):
 
         weight_tensor_layer['gate'] = weight_file.get_tensor(gate_name)
 
-        print(f"load weight {weight_tensor_layer['gate'].dtype}, original dtype  {weight_file.get_tensor(gate_name).dtype}")
+        # print(f"load weight {weight_tensor_layer['gate'].dtype}, original dtype  {weight_file.get_tensor(gate_name).dtype}")
 
         # load expert weight
         experts_num = config.n_routed_experts

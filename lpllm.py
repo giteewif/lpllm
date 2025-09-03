@@ -1,8 +1,10 @@
 from lpllm.utils import get_torch_gpu_memory, get_current_process_gpu_memory,get_gpu_memory_usage
 from lpllm.pinpool import FixedSizePinnedMemoryPool, PinnedMemoryPool
+from lpllm.store_reader import TensorInfo, SafetensorReader
 import importlib
 import os
 import gc
+import json
 import torch
 import threading
 from threading import Thread
@@ -11,6 +13,16 @@ from transformers.cache_utils import Cache, DynamicCache
 from .task_struct import IO_Task
 from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
 import time
+import logging
+import math
+
+logger = logging.getLogger(__name__)  # 通常使用模块的名字
+logger.setLevel(logging.INFO)  # 设置日志级别
+
+fh = logging.FileHandler('lpllm/decoder.log')
+fh.setLevel(logging.INFO)  # 文件日志级别
+
+logger.addHandler(fh)
 
 class LPLLM():
     def __init__(
@@ -27,23 +39,31 @@ class LPLLM():
         self.running=False
         # config.json
         
-        get_gpu_memory_usage("before load class")
+        # get_gpu_memory_usage("before load class")
+        time_start = time.time()
         self.model = self._load_model_class()
         self.model.eval()
-        get_gpu_memory_usage("after load class")
+        logger.info(f"model load class {time.time()-time_start}")
+        # get_gpu_memory_usage("after load class")
         
         self.config=self.get_config()
         self.layer_num=self.config.num_hidden_layers
         
-        if device != "cuda:1":
-            raise ValueError(
-                f"Should use cuda:1 for test"
-            )
+        # if device != "cuda:1":
+        #     raise ValueError(
+        #         f"Should use cuda:1 for test"
+        #     )
+        
         # self.compute_stream = torch.cuda.Stream(device=device)
         self.io_stream = torch.cuda.Stream(device=device)
+        self.io_attn_stream=torch.cuda.Stream(device=device)
         self.mlp_stream=torch.cuda.Stream(device=device)
         
+
+        self.reader = SafetensorReader()
+
         self.io_queue = Queue()
+        self.io_attnout_queue = Queue()
         self.layer_io_queue = Queue()
         self.cpu_queue = Queue()
         self.out_queue=Queue()
@@ -52,25 +72,33 @@ class LPLLM():
         self.attn_weights_loading=False       
         self.has_pause_layer_weights=False 
         # [0] start the layer1 tensor in deepseek
-        self.layers_tensor=self.load_layers_state_dict(self.model_path)
         
         torch_dytpe = self.config.torch_dtype
-        self.pool = PinnedMemoryPool(pool_size=4096, dtype=torch_dytpe)
+        self.pool = PinnedMemoryPool(pool_size=4096*10, dtype=torch.int8)
         
+        time_start=time.time()
+        self.layers_tensor, self.pool_tensor_bytes, self.metadatas_map = self.load_layers_state_dict(
+            self.model_path, self.pool
+        )
+        logger.warning(f"load states dict cost {time.time()-time_start} seconds")
+
+
+       
         
-        get_gpu_memory_usage("before load one layer")
+        # get_gpu_memory_usage("before load one layer")
         self.layerc = self.get_layer(
             layer_idx=1, 
             device=self.device, 
             dtype=self.config.torch_dtype
         )
-        get_gpu_memory_usage("after load one layer")
-        self.layern = self.get_empty_layer(
+        # get_gpu_memory_usage("after load one layer")
+        self.layern = self.get_layer(
             layer_idx=2,
             device=self.device,
             dtype=self.config.torch_dtype
         )
-        get_gpu_memory_usage("after load second layer")
+        # get_gpu_memory_usage("after load second layer")
+
     def _load_model_class(self):
         """动态加载模型实现类"""
         try:
@@ -93,9 +121,25 @@ class LPLLM():
     
     def load_weight2layer_general(self, layer, layer_idx, layer_tensor):
         self.model.load_weight2layer_general(layer, layer_idx, layer_tensor)
-    def load_layers_state_dict(self, path):
-        layers_state_dict=self.model.load_layers_tensor_general(path)
-        return layers_state_dict
+        
+    def get_total_size(self, path: str):
+        index_path = path + "/model.safetensors.index.json"
+        with open(index_path, "r") as f:
+            index = json.load(f)
+            total_size = index["metadata"]["total_size"]
+        total_size_kb = math.ceil(total_size/4096)*4096 / 1024
+        return total_size_kb
+   
+    def load_layers_state_dict(self, path: str, pool: PinnedMemoryPool):
+        total_size_kb = self.get_total_size(path)
+
+        pool_tensor_bytes = pool.alloc_kb(total_size_kb)
+
+        layers_state_dict, metadatas_map = self.reader.load_path(
+            path=path, pin_pool=pool_tensor_bytes,
+            pool_size=total_size_kb*1024
+        )
+        return layers_state_dict, pool_tensor_bytes, metadatas_map
     def load_layer(self, layer, layer_idx):
         with torch.cuda.Stream(self.io_stream):
             tensor = self.load_layer_tensor(layer_idx, self.model_path)
@@ -113,7 +157,9 @@ class LPLLM():
                 obj = getattr(obj, attr)
         
         return obj
-
+    def get_single_chunks(self, ):
+        
+        pass
     def get_layer_chunks(self, layer_state_dict):
 
         chunks_load_array = []
@@ -167,13 +213,18 @@ class LPLLM():
             
     def load_layer_concurrent(self, layer, layer_idx):
         layer_state_dict = self.layers_tensor[layer_idx]
+        pool = self.layers_tensor["pool"]
         layer_chunks = self.get_layer_chunks(layer_state_dict=layer_state_dict)
+        layer_load_event = threading.Event()
         layer_io_task = {
             "layer": layer,
             "layer_idx": layer_idx,
-            "chunks": layer_chunks
+            "chunks": layer_chunks,
+            "pool": pool,
+            "ev": layer_load_event
         }
         self.layer_io_queue.put(layer_io_task)
+        return layer_load_event
         
     def load_layer_tensor(self, layer_idx, path):
         layer_tensor = self.model.load_layer_tensor(layer_idx, path)
@@ -216,7 +267,7 @@ class LPLLM():
         }
         self.cpu_queue.put(cpu_task)
     def cpu_attn(self):
-        print(f"cpu_attn id {self.get_thread_id()}")
+        logger.info(f"cpu_attn id {self.get_thread_id()}")
         while self.running:
             attn_task = self.cpu_queue.get()
             
@@ -225,7 +276,7 @@ class LPLLM():
                 break
             
             attn_inputs = attn_task["attn_inputs"]
-            # print(type(attn_inputs))
+            # logger.info(type(attn_inputs))
             # on cpu
             time_start =time.time()
             
@@ -235,7 +286,7 @@ class LPLLM():
                 
             attn_output=self.model.attn(**attn_inputs)    
             
-            print(f"cpu attn cost {time.time() - time_start}")
+            logger.info(f"cpu attn cost {time.time() - time_start}")
             io_type=1
             
             io_map = {
@@ -267,7 +318,9 @@ class LPLLM():
             "layer_idx": -1,
         }
         self.layer_io_queue.put(layer_stop)
-    def release_attn_inputs(self, attn_inputs):
+    def release_attn_inputs(self, out_map):
+        attn_cpu=out_map["attn_output_cpu"]
+        attn_inputs=out_map["attn_inputs"]
         q_data = attn_inputs["query_states"]
         s_data = attn_inputs["sin"]
         c_data = attn_inputs["cos"]
@@ -278,47 +331,64 @@ class LPLLM():
             self.pool.free(s_data)
         if c_data != None:
             self.pool.free(c_data)
-        
+        if attn_cpu != None:
+            self.pool.free(attn_cpu)
     def io_layer_func(self):
-        print(f"setup layer io func")
-        print(f"io_layer_func id {self.get_thread_id()}")
-        while self.running:
-            layer_io = self.layer_io_queue.get()
-            
-            layer_idx = layer_io["layer_idx"]
-            if layer_idx < 0:
-                break
-            layer = layer_io["layer"]
-            chunks = layer_io["chunks"]
-            
-            time_start = time.time()
-            chunk_load_time_list = []
-            # print("start load layer")
-            # with torch.cuda.Stream(self.io_stream):
-            #     for chunk_info in chunks:
-            #         key = chunk_info['key']
-            #         chunk = chunk_info['chunk']
-            #         indices = chunk_info['indices']
+        logger.info(f"setup layer io func")
+        logger.info(f"io_layer_func id {self.get_thread_id()}")
+        with torch.cuda.Stream(self.io_stream) as io_stream:
+            while self.running:
+                layer_io = self.layer_io_queue.get()
+                layer_idx = layer_io["layer_idx"]
+                if layer_idx < 0:
+                    break
+                layer = layer_io["layer"]
+                chunks = layer_io["chunks"]
+                # pool_tensor_bytes = layer.io["pool"]
+
+                time_start = time.time()
+                chunk_load_time_list = []
+                logger.info("start load layer")
+                # io_event = torch.cuda.Event(enable_timing=True)
+
+                for chunk_info in chunks:
+                    key = chunk_info['key']
+                    # on cpu tensor
+                    chunk = chunk_info['chunk']
+                    indices = chunk_info['indices']
                     
-            #         # 获取目标weight对象
-            #         weight_obj = LPLLM.access_by_string(layer, key)
+                    # 获取目标weight对象
+                    weight_obj = LPLLM.access_by_string(layer, key)
                     
-            #         if self.has_attn_weights_loading():
-            #             self.pause_layer_weights_loading()
+                    if self.has_attn_weights_loading():
+                        self.pause_layer_weights_loading()
                     
-            #         time_single_start = time.time()
-            #         # 如果有索引信息，说明是分块数据，需要复制到特定位置
-            #         if indices is not None:
-            #             start_idx, end_idx = indices
-            #             # 将分块数据复制到目标张量的相应位置
-            #             weight_obj.data[start_idx:end_idx].copy_(chunk)
-            #         else:
-            #             # 直接复制整个张量
-            #             weight_obj.data.copy_(chunk)
-            #         chunk_load_time_list.append(time.time()-time_single_start)
-            layer.layer_idx = layer_idx
-            # print(f"load layer {layer_idx} duration {time.time()-time_start} avg {sum(chunk_load_time_list)/len(chunk_load_time_list)}")
+                    time_single_start = time.time()
+                    # 如果有索引信息，说明是分块数据，需要复制到特定位置
+
+                    
+                    if indices is not None:
+                        start_idx, end_idx = indices
+                        # 将分块数据复制到目标张量的相应位置
+                        weight_obj.data[start_idx:end_idx].copy_(chunk, non_blocking=True)
+                    else:
+                        # 直接复制整个张量
+                        weight_obj.data.copy_(chunk, non_blocking=True)
+                    # print(weight_obj.data.device)
+                    chunk_load_time_list.append(time.time()-time_single_start)
+
+                layer.layer_idx = layer_idx
+                # io_event.record(io_stream)
+                # io_event.synchronize()
+
+                logger.warning(f"load layer {layer_idx} duration {time.time()-time_start} avg {sum(chunk_load_time_list)/len(chunk_load_time_list)}")
+                layer_load_event = layer_io["ev"]
+                print(f"firt {time.time()}")
+                layer_load_event.set()
+
+                
     def stop_io(self):
+
         io_stop = {
             "type": -1,
         }
@@ -327,49 +397,83 @@ class LPLLM():
     def get_thread_id(self):
         thread_id = threading.get_native_id()
         return thread_id
-    def io_func(self):
-        print(f"setup io func")
-        # f_layer = open("io_layer.log", "w")
-        print(f"io_func id {self.get_thread_id()}")
-        while self.running:
-            # 立刻获取一次，然后阻塞获取
-            try:
-                io_task = self.io_queue.get(block=False)
-            except Empty:
-                self.unset_attn_weights_loading()
-                self.notify_layer_weights_loading()
-                io_task = self.io_queue.get()
-                
-            self.set_attn_weights_loading()
-            # io_task = self.io_queue.get()
-            io_type=io_task["type"]
-            io_type=int(io_type)
-            if io_type < 0:
-                break
-            # gpu2cpu
-            if io_type == 0: 
+    def stop_io_attn(self):
+        io_attn_stop = {
+            "type": -1,
+        }
+        self.io_attnout_queue.put(io_attn_stop)
+    def io_out_func(self):
+        logger.info(f"setup io out func")
+        logger.info(f"io_out_func id {self.get_thread_id()}")
+        with torch.cuda.Stream(self.io_attn_stream):
+            while self.running:
+                try:
+                    io_task = self.io_attnout_queue.get(block=False)
+                except Empty:
+                    io_task = self.io_attnout_queue.get()
+                time_start=time.time()
+                io_type=io_task["type"]
+                if io_type <= -1:
+                    break
+                move_attn_output = io_task["attn_output"]
+                d_device = io_task["d_device"]
                 attn_inputs = io_task["attn_inputs"]
-                q_data = attn_inputs["query_states"]
-                k_data = attn_inputs["key_states"]
-                v_data = attn_inputs["value_states"]
-                s_data = attn_inputs["sin"]
-                c_data = attn_inputs["cos"]
-                time_start = time.time()
-                # print(f"move qkv map")
-                # torch.cuda.synchronize(device=self.device)
-                # 将数据从GPU移动到CPU
+
+                attn_cpu = self.pool.alloc_same_pin_tensor(move_attn_output)
+                attn_cpu.copy_(move_attn_output, non_blocking=True)
+                attn_output = attn_cpu.to(device=d_device, non_blocking=True)
+
+                logger.info(f"move attn_output finish {time.time()} {time.time()-time_start}")
+                out_map = {
+                    "attn_output": attn_output,
+                    "attn_inputs": attn_inputs
+                }
+                self.out_queue.put(out_map)
+
+    def io_func(self):
+        logger.info(f"setup io func")
+        # f_layer = open("io_layer.log", "w")
+        logger.info(f"io_func id {self.get_thread_id()}")
+        with torch.cuda.Stream(self.io_stream):
+            while self.running:
+                # 立刻获取一次，然后阻塞获取
+                try:
+                    io_task = self.io_queue.get(block=False)
+                except Empty:
+                    self.unset_attn_weights_loading()
+                    self.notify_layer_weights_loading()
+                    io_task = self.io_queue.get()
+                    
+                self.set_attn_weights_loading()
+                # io_task = self.io_queue.get()
+                io_type=io_task["type"]
+                io_type=int(io_type)
+                if io_type < 0:
+                    break
+                # gpu2cpu
+                if io_type == 0: 
+                    attn_inputs = io_task["attn_inputs"]
+                    q_data = attn_inputs["query_states"]
+                    k_data = attn_inputs["key_states"]
+                    v_data = attn_inputs["value_states"]
+                    s_data = attn_inputs["sin"]
+                    c_data = attn_inputs["cos"]
+                    time_start = time.time()
+                    # logger.info(f"move qkv map")
+                    # torch.cuda.synchronize(device=self.device)
+                    # 将数据从GPU移动到CPU
+                    
+                    # with same shape
+                    time_start_alloc = time.time()
+                    q_c = self.pool.alloc_same_pin_tensor(q_data)
+                    k_c = self.pool.alloc_same_pin_tensor(k_data)
+                    v_c = self.pool.alloc_same_pin_tensor(v_data)
+                    
+                    s_c = self.pool.alloc_same_pin_tensor(s_data)
+                    c_c = self.pool.alloc_same_pin_tensor(c_data)
+                    logger.info(f"alloc pin memory cost {time.time()-time_start_alloc:.6f} seconds")
+                    
                 
-                # with same shape
-                time_start_alloc = time.time()
-                q_c = self.pool.alloc_same_pin_tensor(q_data)
-                k_c = self.pool.alloc_same_pin_tensor(k_data)
-                v_c = self.pool.alloc_same_pin_tensor(v_data)
-                
-                s_c = self.pool.alloc_same_pin_tensor(s_data)
-                c_c = self.pool.alloc_same_pin_tensor(c_data)
-                print(f"alloc pin memory cost {time.time()-time_start_alloc:.6f} seconds")
-                
-                with torch.cuda.Stream(self.io_stream):
                     if_block=True
                     q_c.copy_(q_data, non_blocking=if_block)
                     k_c.copy_(k_data, non_blocking=if_block)
@@ -378,55 +482,64 @@ class LPLLM():
                     s_c.copy_(s_data, non_blocking=if_block)
                     c_c.copy_(c_data, non_blocking=if_block)
                     
+
+                    s_data.copy_(s_c, non_blocking=if_block)
+
+
                     
                     ev = torch.cuda.Event()
                     ev.record(stream=self.io_stream)
-                    
-                    # q_c = q_data.to("cpu", non_blocking=True)
-                    # k_c = k_data.to("cpu", non_blocking=True)
-                    # v_c = v_data.to("cpu", non_blocking=True)
+                        
+                        # q_c = q_data.to("cpu", non_blocking=True)
+                        # k_c = k_data.to("cpu", non_blocking=True)
+                        # v_c = v_data.to("cpu", non_blocking=True)
 
-                    # s_c = s_data.to("cpu", non_blocking=True)
-                    # c_c = c_data.to("cpu", non_blocking=True)
-                # torch.cuda.synchronize(device=self.device)
-                print(f"move qkv finish {time.time()} cost {time.time()-time_start}")
-                # print(type(attn_inputs))
-                attn_inputs.update({
-                    "query_states": q_c, 
-                    "key_states": k_c, 
-                    "value_states": v_c, 
-                    "sin": s_c, "cos": c_c,
-                    "copy_event": ev
-                })
-                # print(type(attn_inputs))
-                attn_task = {
-                    "attn_inputs": attn_inputs,
-                    "type": 0
-                }
-                self.cpu_queue.put(attn_task)
-                
-            # cpu2gpu
-            elif io_type == 1:
-                # print(f"move attn_output")
-                time_start=time.time()
-                move_attn_output = io_task["attn_output"]
-                d_device = io_task["d_device"]
-                attn_inputs = io_task["attn_inputs"]
-                with torch.cuda.Stream(self.io_stream):
-                    attn_output = move_attn_output.to(device=d_device, non_blocking=True)
-                # torch.cuda.synchronize(device=self.device)
-                print(f"move attn_output finish {time.time()} {time.time()-time_start}")
-                out_map = {
-                    "attn_output": attn_output,
-                    "attn_inputs": attn_inputs
-                }
-                self.out_queue.put(out_map)
+                        # s_c = s_data.to("cpu", non_blocking=True)
+                        # c_c = c_data.to("cpu", non_blocking=True)
+                    # torch.cuda.synchronize(device=self.device)
+                    logger.info(f"move qkv finish {time.time()} cost {time.time()-time_start}")
+                    # logger.info(type(attn_inputs))
+                    attn_inputs.update({
+                        "query_states": q_c, 
+                        "key_states": k_c, 
+                        "value_states": v_c, 
+                        "sin": s_c, "cos": c_c,
+                        "copy_event": ev
+                    })
+                    # logger.info(type(attn_inputs))
+                    attn_task = {
+                        "attn_inputs": attn_inputs,
+                        "type": 0
+                    }
+                    self.cpu_queue.put(attn_task)
+                    
+                # cpu2gpu
+
+                elif io_type == 1:
+                    # logger.info(f"move attn_output")
+
+                    time_start=time.time()
+                    move_attn_output = io_task["attn_output"]
+                    d_device = io_task["d_device"]
+                    attn_inputs = io_task["attn_inputs"]
+                    
+                    # move_attn_output not in pin cpu
+                    attn_cpu = self.pool.alloc_same_pin_tensor(move_attn_output)
+                    attn_cpu.copy_(move_attn_output, non_blocking=True)
+                    attn_output = attn_cpu.to(device=d_device, non_blocking=True)
+
+                    out_map = {
+                        "attn_output": attn_output,
+                        "attn_output_cpu": attn_cpu,
+                        "attn_inputs": attn_inputs
+                    }
+                    self.out_queue.put(out_map)
             # else:
                 
             #     layer=io_task["layer"]
             #     layer_idx=io_task["layer_idx"]
             #     time_start = time.time()
-            #     print(f"load layer {layer_idx} start")
+            #     logger.info(f"load layer {layer_idx} start")
             #     if layer_idx >= self.layer_num:
             #         raise ValueError(
             #             f"layer_idx should less than layer_num"
@@ -434,7 +547,7 @@ class LPLLM():
             #     with torch.cuda.Stream(self.io_stream):
             #         tensor=self.layers_tensor[layer_idx]
             #         self.load_weight2layer_general(layer, layer_idx, tensor)
-            #     print(f"load layer {layer_idx} finish take {time.time() - time_start}")
+            #     logger.info(f"load layer {layer_idx} finish take {time.time() - time_start}")
     def decoder_qkv(
         self,
         layer,
@@ -454,7 +567,7 @@ class LPLLM():
             output_attentions=output_attentions
         )
     def decoder_attn_queue(self, attn_inputs, io_queue, out_queue):
-        self.model.attn_compute_concurrent(
+        self.model.attn_compute_queue(
             attn_inputs=attn_inputs,
             io_queue=io_queue,
             out_queue=out_queue
@@ -485,11 +598,13 @@ class LPLLM():
         mlp_layer,
         mlp_hidden_states,
         mlp_o_hidden_states,
+        attn_queue_map=None
     ):
         mlp_output=self.model.mlpc(
             layer=mlp_layer,
             hidden_states=mlp_hidden_states,
-            o_hidden_states=mlp_o_hidden_states
+            o_hidden_states=mlp_o_hidden_states,
+            attn_queue_map=attn_queue_map
         )
         return mlp_output
     def sync(self):
@@ -514,7 +629,7 @@ class LPLLM():
         
         layerc=self.layerc
         layern=self.layerc
-        cur_layer_idx=0
+        cur_layer_idx=1
         
         layer_output1 = None
         layer_output2 = None
@@ -526,7 +641,7 @@ class LPLLM():
         position_ids=position_ids1
         time_start = time.time()
         
-        attn_inputs = self.decoder_qkv(
+        _ = self.decoder_attn(
             layer=layerc,
             hidden_states=hidden_states_attn,
             past_key_value=past_key_value,
@@ -534,20 +649,13 @@ class LPLLM():
             position_ids=position_ids,
         )
 
-        self.decoder_attn_queue(
-            attn_inputs=attn_inputs,
-            io_queue=self.io_queue,
-            out_queue=self.out_queue
-        )
-
         # self.sync()
         out_map = self.async_get_attn()
-        print(f"first attn cost {time.time()-time_start}")
+        logger.info(f"first attn cost {time.time()-time_start}")
         
         attn_output = out_map["attn_output"]
-        attn_inputs = out_map["attn_inputs"]
         
-        self.release_attn_inputs(attn_inputs)
+        self.release_attn_inputs(out_map)
         
         j=1
         
@@ -555,6 +663,7 @@ class LPLLM():
         
         mlp_output=hidden_states2
         
+        layer_load_event = None
         while True:
         # for i in range(20):
             load_next_layer=False
@@ -563,13 +672,7 @@ class LPLLM():
             # should first
             j = j+1
             if j%2==0:
-                # layerc.layer_idx
-                cur_layer_idx=cur_layer_idx+1
-                # deal the layer 0-27
-                if cur_layer_idx == layer_num-1:
-                    break
-                if cur_layer_idx < layer_num-1:
-                    load_next_layer=True
+                
                        
                 layerc=layern
                 layer_attn=layerc
@@ -585,15 +688,24 @@ class LPLLM():
                 past_key_value=past_key_value1
                 attention_mask=attention_mask1
                 position_ids=position_ids1
+
+                # layerc.layer_idx
+                cur_layer_idx=cur_layer_idx+1
+                # deal the layer 0-27
+                if cur_layer_idx == layer_num:
+                    break
+                if cur_layer_idx < layer_num-1:
+                    load_next_layer=True
+
     
             hidden_states_mlp =  hidden_states_attn
             hidden_states_mlp_o = attn_output
             hidden_states_attn = mlp_output    
             
             if load_next_layer:
-                # print(f"need to load next layer")
+                # logger.info(f"need to load next layer")
                 next_layer_idx=cur_layer_idx+1
-                self.load_layer_concurrent(self.layern, next_layer_idx)
+                layer_load_event = self.load_layer_concurrent(self.layern, next_layer_idx)
                 layern=self.layern
             
             # _ = self.decoder_attn(
@@ -602,44 +714,51 @@ class LPLLM():
             #     past_key_value=past_key_value,
             #     attention_mask=attention_mask,
             #     position_ids=position_ids,
-            # )
-            attn_inputs = self.decoder_qkv(
+            # ) 
+            
+
+            attn_inputs=self.decoder_qkv(
                 layer=layer_attn,
                 hidden_states=hidden_states_attn,
                 past_key_value=past_key_value,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
             )
+            # self.decoder_attn_queue(
+            #     attn_inputs=attn_inputs,
+            #     io_queue=self.io_queue,
+            #     out_queue=self.out_queue
+            # )
+
+            attn_queue_map = {
+                "queue_func": self.decoder_attn_queue,
+                "attn_inputs": attn_inputs,
+                "io_queue": self.io_queue,
+                "out_queue": self.out_queue
+            }
+            logger.info(f"decoder mlp start {time.time()}")
             
-            self.decoder_attn_queue(
-                attn_inputs=attn_inputs,
-                io_queue=self.io_queue,
-                out_queue=self.out_queue
-            )
-              
-                
-            print(f"decoder mlp start {time.time()}")
+            # attn_queue_map = None
             mlp_output = self.decoder_mlp(
                 mlp_layer=layer_mlp,
                 mlp_hidden_states=hidden_states_mlp,
                 mlp_o_hidden_states=hidden_states_mlp_o,
+                attn_queue_map=attn_queue_map
             )
-            print(f"decoder_mlp cost {time.time()}")
-            
-          
+            logger.info(f"decoder_mlp cost {time.time()} seconds")
 
             time_start_asyncget = time.time()
             out_map = self.async_get_attn()
-            print(f"async get cost {time.time()-time_start_asyncget} seconds")
-
             attn_output = out_map["attn_output"]
-            attn_inputs = out_map["attn_inputs"]
-            # print(f"before release {self.pool.get_usage_info()}")
-            self.release_attn_inputs(attn_inputs)
-            # print(f"after release {self.pool.get_usage_info()}")
-            
-            print(f"decoder layer {cur_layer_idx} j {j} {time.time()} cost {time.time()-time_start_decoder}\n")
-            # get_gpu_memory_usage(f"layer {cur_layer_idx}")
+            self.release_attn_inputs(out_map)
+            logger.info(f"async get cost {time.time()-time_start_asyncget} seconds")
+
+            # wait layern load ready
+            if not load_next_layer and layer_load_event != None:
+                layer_load_event.wait()
+                layer_load_event=None
+            logger.warning(f"decoder layer {cur_layer_idx} j {j} {time.time()} cost {time.time()-time_start_decoder}\n")
+
             
             
         if cur_layer_idx != layer_num-1:
@@ -697,7 +816,7 @@ class LPLLM():
             o_hidden_states=mlp_o_hidden_states
         )
         # torch.cuda.synchronize(device="cuda:1")
-        # print(f"mlp cost {time.time()-time_start}")
+        # logger.info(f"mlp cost {time.time()-time_start}")
         return attn_output, present_key_value, mlp_output
     def prepare_inputs_for_generation(
         self,
@@ -723,11 +842,13 @@ class LPLLM():
         thread_attn=Thread(target=self.cpu_attn, args=())
         thread_io_layer = Thread(target=self.io_layer_func, args=())
         thread_io=Thread(target=self.io_func, args=())
+        # thread_io_attn=Thread(target=self.io_out_func, args=())
         
         thread_attn.start()
         thread_io_layer.start()
         thread_io.start()
-        
+        # thread_io_attn.start()
+
         return thread_attn, thread_io_layer, thread_io
 
     def stop_thread(self):
@@ -735,6 +856,7 @@ class LPLLM():
         self.stop_io()
         self.stop_io_layer()
         self.stop_attn()
+        # self.stop_io_attn()
         
 def main():
     model_name = "deepseek_16b"
@@ -743,13 +865,13 @@ def main():
     
     
     get_gpu_memory_usage()
-    
+    device="cuda:0"
     tokenizer=AutoTokenizer.from_pretrained(model_path)
     lm = LPLLM(
         model_name=model_name, 
         model_path=model_path, 
         class_name=class_name,
-        device="cuda:1"
+        device=device
     )
     config = lm.get_config()
     
@@ -759,8 +881,8 @@ def main():
     get_gpu_memory_usage("init lm")
     
     i_size=config.hidden_size
-    device="cuda:1"
-    batch_size=8
+    
+    batch_size=8*10
     seq_len = 512
     dtype = torch.bfloat16
     
@@ -768,6 +890,7 @@ def main():
     input2_ids = torch.randint(0, config.vocab_size, (batch_size, seq_len), device=device)
     input_tensor = torch.randn(batch_size, seq_len, i_size, dtype=dtype, device=device)
 
+    
     get_gpu_memory_usage()
     
     (input_embeds1, attention_mask1,
@@ -794,7 +917,6 @@ def main():
     
     get_gpu_memory_usage()
     
-
     time_start=time.time()
       
     layer_output1, layer_output2 = lm.decoders(
@@ -818,25 +940,42 @@ def main():
     #     )
     #     mlp_output=mlp_output_new
     #     get_gpu_memory_usage("mlp compute")
-    
-    print(f"decoders cost {time.time()-time_start} seconds")
+    get_gpu_memory_usage()
+    info = lm.pool.get_usage_info()
+    logger.warning(f"cpu pin memory info {info}")
+    logger.warning(f"decoders cost {time.time()-time_start} seconds")
     lm.stop_thread()
     
-def main_new():
-    q = Queue()
-    weight=torch.randn(8,512,2048, device="cpu")
-    def io_func():
-        a = q.get()
-        time_start=time.time()
-        
-        weight.to(device="cuda:1")
-        
-        print(f"cost {time.time()-time_start}")
-        
-    thread_io=Thread(target=io_func, args=())
-    thread_io.start()
+def main_load():
+    model_name = "deepseek_16b"
+    model_path = "/mnt/zhengcf3/lpllm/models/deepseek_16b"
+    class_name = "Deepseek"
     
-    q.put(1)
+    
+    # get_gpu_memory_usage()
+    device="cuda:0"
+    time_start_init = time.time()
+    lm = LPLLM(
+        model_name=model_name, 
+        model_path=model_path, 
+        class_name=class_name,
+        device=device
+    )
+    print(f"init time cost {time.time()-time_start_init} s")
+
+    
+
+    lm.running = True
+    thread_io_layer = Thread(target=lm.io_layer_func, args=())
+    thread_io_layer.start()
+
+    event = lm.load_layer_concurrent(lm.layerc, 1)
+
+    event.wait()
+    # lm.running=False
+    print(f"{time.time()}")
+    lm.stop_io_layer()
+    
 if __name__ == "__main__":
-    main()
-    # main_new()
+    # main()
+    main_load()

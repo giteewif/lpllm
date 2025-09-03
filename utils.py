@@ -19,7 +19,7 @@ def get_torch_gpu_memory():
 def get_gpu_memory_usage(name=""):
     try:
         nvmlInit()
-        handle = nvmlDeviceGetHandleByIndex(1)  # 默认使用第一个GPU
+        handle = nvmlDeviceGetHandleByIndex(0)  # 默认使用第一个GPU
         info = nvmlDeviceGetMemoryInfo(handle)
         
         map = {

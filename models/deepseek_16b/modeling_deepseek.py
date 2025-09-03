@@ -378,12 +378,13 @@ class DeepseekMoE(nn.Module):
             intermediate_size = config.moe_intermediate_size * config.n_shared_experts
             self.shared_experts = DeepseekMLP(config=config, intermediate_size = intermediate_size)
     
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, attn_queue_map=None):
         identity = hidden_states
         orig_shape = hidden_states.shape
         topk_idx, topk_weight, aux_loss = self.gate(hidden_states)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
+        
         if self.training:
             hidden_states = hidden_states.repeat_interleave(self.num_experts_per_tok, dim=0)
             y = torch.empty_like(hidden_states)
@@ -394,12 +395,66 @@ class DeepseekMoE(nn.Module):
             y = AddAuxiliaryLoss.apply(y, aux_loss)
         else:
             # print(f"before call moe_infer")
-            y = self.moe_infer(hidden_states, flat_topk_idx, topk_weight.view(-1, 1)).view(*orig_shape)
+            
+            # y = self.moe_infer(hidden_states, flat_topk_idx, topk_weight.view(-1, 1)).view(*orig_shape)
+            
+            # if attn_queue_map != None:
+            #     queue_func = attn_queue_map["queue_func"]
+            #     attn_inputs = attn_queue_map["attn_inputs"]
+            #     io_queue = attn_queue_map["io_queue"]
+            #     out_queue = attn_queue_map["out_queue"]
+            #     queue_func(attn_inputs=attn_inputs, io_queue=io_queue, out_queue=out_queue)
+
+            expert_out_list = self.moe_infer_noscatter(
+                hidden_states, 
+                flat_topk_idx, topk_weight.view(-1, 1),
+                attn_queue_map=attn_queue_map
+            )
+            
+            expert_cache = torch.zeros_like(hidden_states)
+            for (exp_token_idx, expert_out) in expert_out_list:
+                expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, hidden_states.shape[-1]), expert_out,reduce='sum')
+            y = expert_cache.view(*orig_shape)
+
         if self.config.n_shared_experts is not None:
             y = y + self.shared_experts(identity)
         return y
     
-    
+    # return list
+    @torch.no_grad()
+    def moe_infer_noscatter(self, x, flat_expert_indices, flat_expert_weights, attn_queue_map=None):
+        
+        import time
+        expert_out_list = []
+        idxs = flat_expert_indices.argsort()
+        # print(f"before tokens_per_expert {time.time()}")
+        tokens_per_expert = flat_expert_indices.bincount().cpu().numpy().cumsum(0)
+        # print(f"after tokens_per_expert {time.time()}")
+        token_idxs = idxs // self.num_experts_per_tok
+        
+        if attn_queue_map != None:
+            queue_func = attn_queue_map["queue_func"]
+            attn_inputs = attn_queue_map["attn_inputs"]
+            io_queue = attn_queue_map["io_queue"]
+            out_queue = attn_queue_map["out_queue"]
+            queue_func(attn_inputs=attn_inputs, io_queue=io_queue, out_queue=out_queue)
+
+        for i, end_idx in enumerate(tokens_per_expert):
+            start_idx = 0 if i == 0 else tokens_per_expert[i-1]
+            if start_idx == end_idx:
+                continue
+            expert = self.experts[i]
+            exp_token_idx = token_idxs[start_idx:end_idx]
+            expert_tokens = x[exp_token_idx]
+            expert_out = expert(expert_tokens)
+            expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
+            
+            expert_out_list.append((exp_token_idx, expert_out))
+            # expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out, reduce='sum')
+            # if i == 0:
+                # print(f"{time.time()} expert {i} finish")
+        return expert_out_list
+
     @torch.no_grad()
     def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
         
@@ -419,6 +474,7 @@ class DeepseekMoE(nn.Module):
             expert_tokens = x[exp_token_idx]
             expert_out = expert(expert_tokens)
             expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
+            
             expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out, reduce='sum')
             # if i == 0:
                 # print(f"{time.time()} expert {i} finish")
@@ -897,7 +953,7 @@ class DeepseekSdpaAttention(DeepseekAttention):
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
 
-        attn_output = self.o_proj(attn_output)
+        # attn_output = self.o_proj(attn_output)
 
         return attn_output, None, past_key_value
 
