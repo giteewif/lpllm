@@ -87,6 +87,7 @@ else:
 
 def is_ninja_available() -> bool:
     try:
+        # subprocess.run(["/root/miniconda3/envs/lpllm/bin/ninja", "--version"], stdout=subprocess.PIPE)
         subprocess.run(["ninja", "--version"], stdout=subprocess.PIPE)
     except FileNotFoundError:
         return False

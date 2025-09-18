@@ -1,4 +1,4 @@
-from lpllm.base import Base
+from lpllm.base import LPModelWrapper
 from lpllm.utils import get_gpu_memory_usage
 from .configuration_deepseek import DeepseekConfig
 from .modeling_deepseek import DeepseekDecoderLayer, DeepseekRMSNorm
@@ -17,7 +17,7 @@ from transformers.cache_utils import Cache, DynamicCache
 from torch import nn
 from typing import List, Optional, Tuple, Union
 from safetensors import safe_open
-class Deepseek(Base, nn.Module):
+class Deepseek(LPModelWrapper, nn.Module):
     def __init__(self, path, device):
         super().__init__()
 

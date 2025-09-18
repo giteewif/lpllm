@@ -48,6 +48,11 @@ def cli():
     help="Memory pool size, e.g., 1GB, 4GB, 1TB",
 )
 @click.option(
+    "--pool-memory-size",
+    default="2GB",
+    help="Pool memory size for qkv sin cos cache, e.g., 1GB, 4GB, 1TB",
+)
+@click.option(
     "--disk-size", default="128GB", help="Disk size, e.g., 1GB, 4GB, 1TB"
 )
 @click.option(
@@ -62,6 +67,7 @@ def start(
     num_thread,
     chunk_size,
     mem_pool_size,
+    pool_memory_size,
     disk_size,
     registration_required,
 ):
@@ -70,7 +76,7 @@ def start(
 
     # Convert the memory pool size to bytes
     mem_pool_size = to_num_bytes(mem_pool_size)
-
+    pool_memory_size = to_num_bytes(pool_memory_size)
     """Start the gRPC server"""
     try:
         logger.info("Starting gRPC server")
@@ -82,6 +88,7 @@ def start(
                 num_thread=num_thread,
                 chunk_size=chunk_size,
                 mem_pool_size=mem_pool_size,
+                pool_memory_size=pool_memory_size,
                 # disk size is not used
                 # disk_size=disk_size,
                 registration_required=registration_required,

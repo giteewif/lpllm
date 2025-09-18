@@ -34,6 +34,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -69,6 +70,7 @@ std::unordered_map<std::string, uint64_t> SaveTensors(
     }
     data_record[data_ptr] = name;
 
+    std::cout << "help";
     uint64_t offset = writer.writeRecord(data_ptr, size);
     tensor_offsets[name] = offset;
 
@@ -107,6 +109,56 @@ at::ScalarType stringToScalarType(const std::string& dtype_str) {
   } else {
     throw std::invalid_argument("Unknown dtype string: " + dtype_str);
   }
+}
+
+// we need to reuse the cudamemory allocated , so we cannot release, when real_tensor free here
+std::unordered_map<std::string, torch::Tensor> RestoreTensors2(
+    const std::unordered_map<
+        std::string, std::tuple<std::vector<int64_t>, std::vector<int64_t>,
+                                std::string>>& meta_state_dict,
+    const std::unordered_map<int, void*>& memory_base_address,
+    const std::unordered_map<int, std::unordered_map<std::string, uint64_t>>&
+        tensor_device_offsets) {
+  std::unordered_map<std::string, torch::Tensor> state_dict;
+  std::unordered_set<void*> handled_memory;
+  for (const auto& [device, tensor_offset] : tensor_device_offsets) {
+    for (const auto& p : tensor_offset) {
+      std::string name = p.first;
+      if (memory_base_address.find(device) != memory_base_address.end()) {
+        void* base_address = memory_base_address.at(device);
+        uint64_t offset = reinterpret_cast<uint64_t>(base_address) + p.second;
+
+        torch::Device tensor_device(torch::kCUDA, device);
+        auto [sizes, strides, type_str] = meta_state_dict.at(name);
+        at::ScalarType dtype = stringToScalarType(type_str);
+        // std::cerr << name << " " << sizes << " " << strides << " " << dtype
+        // << std::endl;
+        if (p.second == 0 &&
+            handled_memory.find(base_address) == handled_memory.end()) {
+          torch::Tensor real_tensor = torch::from_blob(
+              reinterpret_cast<void*>(offset), c10::makeArrayRef(sizes),
+              c10::makeArrayRef(strides), 
+              // [](void* ptr) { cudaFree(ptr); },
+              // don't release here, released outside
+              [](void* ptr) {},
+              torch::TensorOptions().device(tensor_device).dtype(dtype));
+          state_dict[name] = real_tensor;
+          handled_memory.insert(base_address);
+          // std::cerr << "Tensor " << name << " is restored to device " <<
+          // device << std::endl;
+        } else {
+          torch::Tensor real_tensor = torch::from_blob(
+              reinterpret_cast<void*>(offset), sizes, strides, [](void* ptr) {},
+              torch::TensorOptions().device(tensor_device).dtype(dtype));
+          state_dict[name] = real_tensor;
+        }
+      } else {
+        std::cerr << "Cannot find device " << device << std::endl;
+        exit(1);
+      }
+    }
+  }
+  return state_dict;
 }
 
 std::unordered_map<std::string, torch::Tensor> RestoreTensors(
@@ -194,11 +246,40 @@ std::unordered_map<int, void*> AllocateCudaMemory(
     int device = p.first;
     size_t size = p.second;
     void* ptr = nullptr;
-    cudaSetDevice(device);
-    cudaMalloc(&ptr, size);
+    
+    cudaError_t err = cudaSetDevice(device);
+    if (err != cudaSuccess) {
+      std::cerr << "Failed to set CUDA device " << device << ": " 
+                << cudaGetErrorString(err) << std::endl;
+      throw std::runtime_error("Failed to set CUDA device");
+    }
+    
+    err = cudaMalloc(&ptr, size);
+    if (err != cudaSuccess || ptr == nullptr) {
+      std::cerr << "Failed to allocate " << size << " bytes on device " << device 
+                << ": " << cudaGetErrorString(err) << std::endl;
+      throw std::runtime_error("CUDA memory allocation failed");
+    }
+    
     memory_ptrs[device] = ptr;
   }
   return memory_ptrs;
+}
+
+void FreeCudaMemory(
+    const std::unordered_map<int, void*>& memory_ptrs) {
+  for (const auto& p : memory_ptrs) {
+    int device = p.first;
+    void* ptr = p.second;
+    cudaError_t err = cudaSetDevice(device);
+    if (err != cudaSuccess) {
+      std::cerr << "Failed to set CUDA device " << device << ": " 
+                << cudaGetErrorString(err) << std::endl;
+      throw std::runtime_error("Failed to set CUDA device");
+    }
+    cudaFree(ptr);
+  }
+  return;
 }
 
 std::unordered_map<int, std::string> GetCudaMemoryHandles(

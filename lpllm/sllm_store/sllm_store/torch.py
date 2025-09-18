@@ -20,8 +20,11 @@ import os
 import time
 import uuid
 from typing import Dict, Optional, Union
+from tqdm import tqdm
 
 import torch
+
+
 
 # from accelerate.hooks import add_hook_to_module
 from sllm_store._C import (
@@ -45,6 +48,37 @@ logger = init_logger(__name__)
 def _get_uuid():
     return str(uuid.uuid4())
 
+class TensorWriter:
+    def __init__(self, filename):
+        self.filename = filename
+    def writeRecord(base, size):
+        pass
+def save_tensors_python(tensor_names, tensor_data_index, model_path: str):
+    tensor_filename = model_path + "/" + "tensor.data"
+    tensor_offsets = {}
+    data_record = {}
+
+    writer: TensorWriter = TensorWriter(tensor_filename)
+
+    total = len(tensor_names)
+    count = 0
+
+    for name in tensor_names:
+        base, size = tensor_data_index[name]
+        if base in data_record:
+            tensor_offsets[name] = tensor_offsets[data_record[base]]
+            continue
+        data_record[base] = name
+
+        # write base start, and size
+        offset = {}
+        tensor_offsets[name] = offset
+
+        count += 1
+
+        tqdm(count/total)
+
+    return tensor_offsets
 
 def save_dict(
     state_dict: Dict[str, torch.Tensor], model_path: Union[str, os.PathLike]

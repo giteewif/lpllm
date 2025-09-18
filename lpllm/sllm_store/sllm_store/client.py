@@ -155,3 +155,68 @@ class SllmStoreClient:
                 "chunk_size": response.chunk_size,
                 "mem_pool_size": response.mem_pool_size,
             }
+
+    def allocate_pool_memory(self, client_id: str, device_id: int, size_mb: int = None):
+        """Allocate pool memory from server"""
+        request = storage_pb2.AllocatePoolMemoryRequest(
+            client_id=client_id,
+            device_id=device_id,
+            size_mb=size_mb or 0  # Server will use default if 0
+        )
+        try:
+            response = self.stub.AllocatePoolMemory(request)
+            logger.info(f"Allocated pool memory for client {client_id}: {response.size_mb}MB")
+            return response
+        except grpc.RpcError as e:
+            logger.error(f"Failed to allocate pool memory: {e}")
+            return None
+
+    def free_pool_memory(self, client_id: str):
+        """Free pool memory for client"""
+        request = storage_pb2.FreePoolMemoryRequest(client_id=client_id)
+        try:
+            response = self.stub.FreePoolMemory(request)
+            if response.success:
+                logger.info(f"Freed pool memory for client {client_id}")
+            else:
+                logger.warning(f"Failed to free pool memory for client {client_id}")
+            return response.success
+        except grpc.RpcError as e:
+            logger.error(f"Error freeing pool memory: {e}")
+            return False
+
+    def allocate_from_pool(self, client_id: str, size_kb: int):
+        """Allocate a memory block from client's pool using chunk-based allocation"""
+        request = storage_pb2.AllocateFromPoolRequest(
+            client_id=client_id,
+            size_kb=size_kb
+        )
+        try:
+            response = self.stub.AllocateFromPool(request)
+            if response.success:
+                return {
+                    'allocation_id': response.allocation_id,
+                    'chunk_indices': list(response.chunk_indices),
+                    'chunk_size': response.chunk_size
+                }
+            else:
+                logger.warning(f"Failed to allocate {size_kb}KB from pool for client {client_id}: {response.error_message}")
+                return None
+        except grpc.RpcError as e:
+            logger.error(f"Error allocating from pool: {e}")
+            return None
+
+    def free_from_pool(self, client_id: str, allocation_id: int):
+        """Free a memory block back to client's pool using allocation ID"""
+        request = storage_pb2.FreeFromPoolRequest(
+            client_id=client_id,
+            allocation_id=allocation_id
+        )
+        try:
+            response = self.stub.FreeFromPool(request)
+            if not response.success:
+                logger.warning(f"Failed to free allocation {allocation_id} for client {client_id}: {response.error_message}")
+            return response.success
+        except grpc.RpcError as e:
+            logger.error(f"Error freeing from pool: {e}")
+            return False

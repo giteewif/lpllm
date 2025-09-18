@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Union, Deque
 
 import threading
 import torch
+from lpllm.cuda_memcpy_utils import cuda_copy_, safe_copy_
 
 class PinnedMemoryPool:
     def __init__(self,
@@ -141,12 +142,12 @@ class PinnedMemoryPool:
             self.free_list = merged_list
     
     def copy_func(self, src, dst,non_blocking=False):
-        """从src拷贝数据到dst"""
+        """从src拷贝数据到dst using CUDA memcpy"""
         if src.numel() != dst.numel():
             raise ValueError("源和目标内存块大小不匹配")
         dst = self.reshape(dst, src.shape)
         with torch.no_grad():
-            dst.copy_(src, non_blocking=non_blocking)
+            cuda_copy_(dst, src, non_blocking=non_blocking)
         return dst
     def reshape(self, memory_block, new_shape):
         """将内存块reshape为新形状，不进行内存拷贝"""

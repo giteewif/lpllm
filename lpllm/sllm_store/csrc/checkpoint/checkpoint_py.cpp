@@ -18,6 +18,7 @@
 #include <torch/extension.h>
 
 #include "checkpoint.h"
+#include "cuda_memcpy.h"
 
 namespace py = pybind11;
 
@@ -25,7 +26,9 @@ namespace py = pybind11;
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("save_tensors", &SaveTensors, "Save a state dict")
       .def("restore_tensors", &RestoreTensors, "Restore a state dict")
+      .def("restore_tensors2", &RestoreTensors2, "Restore a state dict and not released")
       .def("allocate_cuda_memory", &AllocateCudaMemory, "Allocate cuda memory")
+      .def("free_cuda_memory", &FreeCudaMemory, "Free cuda memory")
       .def(
           "get_cuda_memory_handles",
           [](const std::unordered_map<int, void*>& memory_ptrs) {
@@ -80,5 +83,19 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             return py_memory_handles;
           },
           py::arg("memory_ptrs"), "Get cuda memory handles")
-      .def("get_device_uuid_map", &GetDeviceUuidMap, "Get device uuid map");
+      .def("get_device_uuid_map", &GetDeviceUuidMap, "Get device uuid map")
+      
+      // CUDA memory copy functions
+      .def("cuda_memcpy_h2d", &CudaMemcpyTensorHostToDevice, 
+           py::arg("dst_tensor"), py::arg("src_tensor"), py::arg("non_blocking") = false,
+           "Copy tensor from host to device using cudaMemcpy")
+      .def("cuda_memcpy_d2h", &CudaMemcpyTensorDeviceToHost,
+           py::arg("dst_tensor"), py::arg("src_tensor"), py::arg("non_blocking") = false,
+           "Copy tensor from device to host using cudaMemcpy")
+      .def("cuda_memcpy_d2d", &CudaMemcpyTensorDeviceToDevice,
+           py::arg("dst_tensor"), py::arg("src_tensor"), py::arg("non_blocking") = false,
+           "Copy tensor from device to device using cudaMemcpy")
+      .def("cuda_memcpy_smart", &CudaMemcpyTensorSmart,
+           py::arg("dst_tensor"), py::arg("src_tensor"), py::arg("non_blocking") = false,
+           "Smart tensor copy that automatically determines copy direction");
 }

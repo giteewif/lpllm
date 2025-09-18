@@ -11,6 +11,14 @@ service Storage {
 
   rpc RegisterModel (RegisterModelRequest) returns (RegisterModelResponse) {}
   rpc GetServerConfig (GetServerConfigRequest) returns (GetServerConfigResponse) {}
+
+  // Pool memory management
+  rpc AllocatePoolMemory (AllocatePoolMemoryRequest) returns (AllocatePoolMemoryResponse) {}
+  rpc FreePoolMemory (FreePoolMemoryRequest) returns (FreePoolMemoryResponse) {}
+  rpc AllocateFromPool (AllocateFromPoolRequest) returns (AllocateFromPoolResponse) {}
+  rpc FreeFromPool (FreeFromPoolRequest) returns (FreeFromPoolResponse) {}
+  rpc CopyToPool (CopyToPoolRequest) returns (CopyToPoolResponse) {}
+  rpc CopyFromPool (CopyFromPoolRequest) returns (CopyFromPoolResponse) {}
 }
 
 message GetServerConfigRequest {
@@ -91,4 +99,75 @@ message ClearMemRequest {
 }
 
 message ClearMemResponse {
+}
+
+// Pool Memory Management Messages
+message AllocatePoolMemoryRequest {
+  string client_id = 1;
+  int32 device_id = 2;
+  int32 size_mb = 3;
+}
+
+message AllocatePoolMemoryResponse {
+  string client_id = 1;
+  repeated bytes memory_handles = 2;
+  int32 size_mb = 3;
+  int64 memory_ptr = 4;
+  int64 start_offset = 5;
+  int64 size_bytes = 6;
+  string shared_memory_path = 7;
+}
+
+message FreePoolMemoryRequest {
+  string client_id = 1;
+}
+
+message FreePoolMemoryResponse {
+  bool success = 1;
+}
+
+message AllocateFromPoolRequest {
+  string client_id = 1;
+  int32 size_kb = 2;
+}
+
+message AllocateFromPoolResponse {
+  bool success = 1;
+  int32 allocation_id = 2;
+  repeated int32 chunk_indices = 3;
+  int32 chunk_size = 4;
+  string error_message = 5;
+}
+
+message FreeFromPoolRequest {
+  string client_id = 1;
+  int32 allocation_id = 2;
+}
+
+message FreeFromPoolResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message CopyToPoolRequest {
+  string client_id = 1;
+  int32 allocation_id = 2;
+  int32 chunk_offset = 3;
+  bytes data = 4;
+}
+
+message CopyToPoolResponse {
+  bool success = 1;
+}
+
+message CopyFromPoolRequest {
+  string client_id = 1;
+  int32 allocation_id = 2;
+  int32 chunk_offset = 3;
+  int32 size = 4;
+}
+
+message CopyFromPoolResponse {
+  bool success = 1;
+  bytes data = 2;
 }

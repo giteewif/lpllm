@@ -28,6 +28,14 @@ std::unordered_map<std::string, uint64_t> SaveTensors(
     std::unordered_map<std::string, std::pair<uint64_t, uint64_t>>& tensor_data,
     const std::string& path);
 
+std::unordered_map<std::string, torch::Tensor> RestoreTensors2(
+    const std::unordered_map<
+        std::string, std::tuple<std::vector<int64_t>, std::vector<int64_t>,
+                                std::string>>& meta_state_dict,
+    const std::unordered_map<int, void*>& memory_base_address,
+    const std::unordered_map<int, std::unordered_map<std::string, uint64_t>>&
+        tensor_device_offsets);
+    
 std::unordered_map<std::string, torch::Tensor> RestoreTensors(
     const std::unordered_map<
         std::string, std::tuple<std::vector<int64_t>, std::vector<int64_t>,
@@ -39,6 +47,8 @@ std::unordered_map<std::string, torch::Tensor> RestoreTensors(
 // {dev_id: ptr}
 std::unordered_map<int, void*> AllocateCudaMemory(
     const std::unordered_map<int, size_t>& tensor_sizes);
+void FreeCudaMemory(
+    const std::unordered_map<int, void*>& memory_ptr);
 std::unordered_map<int, std::string> GetCudaMemoryHandles(
     const std::unordered_map<int, void*>& memory_ptrs);
 std::unordered_map<int, std::vector<std::string>> GetCudaMemoryHandles(

@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
 
-class Base(ABC):
+class LPModelWrapper(ABC):
     """模型基类:定义通用接口"""
-    
     @abstractmethod
     def load_layer_tensor(self, layer_idx, path):
         pass

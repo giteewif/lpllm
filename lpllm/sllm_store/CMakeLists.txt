@@ -123,6 +123,7 @@ get_torch_gpu_compiler_flags(SLLM_STORE_GPU_FLAGS ${SLLM_STORE_GPU_LANG})
 set(SLLM_STORE_EXT_SRC
   "csrc/checkpoint/aligned_buffer.cpp"
   "csrc/checkpoint/checkpoint.cpp"
+  "csrc/checkpoint/cuda_memcpy.cpp"
   "csrc/checkpoint/checkpoint_py.cpp"
   "csrc/checkpoint/tensor_writer.cpp"
 )
@@ -138,6 +139,7 @@ set(SLLM_STORE_EXT_SRC
 
 set(SLLM_STORE_CXX_EXT_SRC
   "csrc/checkpoint/aligned_buffer.cpp"
+  "csrc/checkpoint/cuda_memcpy.cpp"
   "csrc/checkpoint/checkpoint_py.cpp"
   "csrc/checkpoint/tensor_writer.cpp"
 )
