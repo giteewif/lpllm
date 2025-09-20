@@ -25,11 +25,10 @@ lp = LPLLM("deepseek-moe-16b-base", tdevice, storage_path)
 config = lp.config
 tokenizer=AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-batch_size = 16
+batch_size = 360
 seq_len = 512
 vocab_size = config.vocab_size
 input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=tdevice)
-layer_output, _, past_key_values, position_ids = lp.split_decoders(input_ids)
 layer_output, _, past_key_values, position_ids = lp.split_decoders(input_ids)
 print(layer_output.shape)
 lp.stop()

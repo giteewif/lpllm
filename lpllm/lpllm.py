@@ -1,4 +1,5 @@
 from ast import mod
+from filecmp import clear_cache
 import logging
 from lpllm.lpmodel import LPModuleWrapper
 from lpllm.logger import init_logger
@@ -320,6 +321,7 @@ class LPLLM():
         # the last one in queue
         layer_attr_loc = layer_loc_index + 1
         # all related layer should be ready
+        time_start_restore = time.time()
         if j_loc % 2 == 1:
             # change attn, mlp not change, could get from class
             update_str = "self_attn"
@@ -327,11 +329,14 @@ class LPLLM():
             self.cuda_memory_view.restore_layer(layer_attn, update_state_dict, layer_attr_loc=layer_attr_loc)
             layer_attn.layer_idx = layer_mlp_idx
         else:
+            if layer_mlp_idx == 0 :
+                return layer_attn, layer_mlp
             # change mlp, attn not change, could get from class
             update_str = "experts"
             update_state_dict = self.cuda_memory_view.updateState(layer_idx=layer_mlp_idx, update_name=update_str, if_mlp=True)
             self.cuda_memory_view.restore_layer(layer_mlp, update_state_dict, layer_attr_loc=layer_attr_loc)
             layer_mlp.layer_idx = layer_mlp_idx
+        logger.debug(f"restore layer cost {time.time()-time_start_restore} s")
         return layer_attn, layer_mlp
 
         
@@ -379,7 +384,7 @@ class LPLLM():
         
         
         # here layer
-        cur_layer_idx = 1
+        cur_layer_idx = 0
         layerc = self.get_layer(layer_idx=cur_layer_idx)
         
         layer_output1 = None
@@ -470,6 +475,7 @@ class LPLLM():
             
             # here layer
             if load_next_layer:
+                time_start_load_gpu =time.time()
                 logger.debug(f"start load next layer cur_layer_idx: {cur_layer_idx+1}")
                 self.start_load_into_gpu(cur_layer_idx+1)
                 
@@ -511,9 +517,12 @@ class LPLLM():
             
             
             # here layer
+        
             if not (cur_layer_idx == layer_num - 1 and need_wait_layer == False):
+                time_start = time.time()
                 layer_attn, layer_mlp = self.reset_next_layer_need(layer_attn_idx=layer_attn_idx, layer_mlp_idx=layer_mlp_idx, j_loc=j)
-            logger.debug(f"start reset next layer layer_attn {layer_attn_idx} layer_mlp {layer_mlp_idx}")
+                logger.debug(f"reset layer cost {time.time()-time_start} s")
+            logger.debug(f"start reset next layer layer_attn {layer_attn_idx} layer_mlp {layer_mlp_idx} ")
 
             logger.debug(f"start async get decoder attn")
             last_attn_input=hidden_states_attn
@@ -526,7 +535,9 @@ class LPLLM():
                 # waiting here
                 time_start_waiting = time.time()
                 self.wait_load_into_gpu(cur_layer_idx+1)
-                logger.debug(f"j: {j} waiting the layer with layer_idx {cur_layer_idx+1} load cost {time.time()-time_start_waiting} s")
+                logger.debug(f"j: {j} waiting the layer with layer_idx {cur_layer_idx+1} and load cost {time.time()-time_start_load_gpu} s \
+                    waiting cost {time.time()-time_start_waiting} s \
+                ")
 
             # here layer
             if load_next_layer:
@@ -547,7 +558,16 @@ class LPLLM():
         
         return layer_output1, layer_output2
         
-    def generate(**inputs):
+    def generate(
+            self, 
+            input_ids,
+            max_new_tokens=32,
+            temperature=1.0,
+            top_p=0.9,
+            do_sample=False,
+            pad_token_id=None,
+            eos_token_id=None
+        ):
         pass
     def forward_prepare(self, input_ids, position_ids, past_key_values, output_attentions, use_cache, attention_mask):
         return self.lpmodule_class.forward_prepare(
@@ -630,8 +650,12 @@ class LPLLM():
         past_key_values = None
         position_ids = None
         return layer_output, attention_mask, past_key_values, position_ids
-    def generate(self, input_ids):
+    
+    def generate(self, input_ids, max_new_tokens=32, temperature=1.0, top_p=0.9, 
+                 do_sample=True, pad_token_id=None, eos_token_id=None):
+        
         pass
+    
     def stop(self):
         self.attn_manager.stop()
     def __def__(self):
@@ -672,7 +696,7 @@ class CudaMemoryView:
         return 1
     def restore_help_model(self, model, model_state_dict):
         for name, param in model_state_dict.items():
-            set_module_tensor_to_device(model, name, param.device, param)
+            set_module_tensor_to_device(model, name, param.device, param, clear_cache=True)
         # buffer_names = [name for name, _ in model.named_buffers()] 
         # logger.debug(f"{buffer_names}")
         # for name, param in model_state_dict.items():
@@ -683,27 +707,34 @@ class CudaMemoryView:
         
         model.eval()
     def restore_layer(self, layer, state_dict, layer_attr_loc):
+
+        time_start_restore_func =  time.time()
         for name, param in state_dict.items():
             relative_layer_name = ".".join(name.split(".")[layer_attr_loc:])
-
-            set_module_tensor_to_device(layer, relative_layer_name, param.device, param)
+            
+            # setattr(layer, relative_layer_name, param)
+            set_module_tensor_to_device(layer, relative_layer_name, param.device, param, clear_cache=False)
         # send_module_buffers_to_device(layer, {"": self.device_index})
         layer.eval()
+
+        logger.debug(f"restore layer func cost {time.time()-time_start_restore_func} s")
         # send_module_buffers_to_device(model, device_map)
 
     def get_state_dict(self, layer_idx: int):
         for state_view in self.memory_queue_allocated.queue:
             if state_view.index == layer_idx:
                 state_dict = state_view.state_dict
-                return state_dict.copy()
+                return state_dict
         raise ValueError(f"state dict should not be empty or layer_idx not match")
     def updateState(self, layer_idx: int, update_name: str, if_mlp: bool):
         # the loc in queue
+
+        time_start_updatestate = time.time()
+
         if if_mlp:
             update_state_loc = self.get_state_loc_mlp()
         else:
             update_state_loc = self.get_state_loc_attn()
-        update_state_loc = -1
         for i in range(len(self.memory_queue_allocated.queue)):
             if self.memory_queue_allocated.queue[i].index == layer_idx:
                 update_state_loc = i
@@ -716,6 +747,7 @@ class CudaMemoryView:
         for src_name, tensor in update_state_dict.items():
             if update_name in src_name:
                 ustate_dict[src_name] = tensor
+        logger.debug(f"update state cost {time.time()-time_start_updatestate} s")
         return ustate_dict
 
     def load_help_model_gpu(self, model_path, model_tensor_copy_chunks, model_tensor_meta_index, model_tensor_device_offsets):
@@ -754,6 +786,7 @@ class CudaMemoryView:
         if not ret1:
             raise ValueError(f"Failed to load model {model_path} {layer_idx} into GPU")
             
+        # 分配torch
         layer_state_dict = restore_tensors2(
             layer_tensor_meta_index, cuda_memory_ptrs, layer_tensor_device_offsets
         )
@@ -834,7 +867,6 @@ class AttnManager:
             )
         else:
             self.pool_memory = PinnedMemoryPool(config.torch_dtype, pool_size)
-
         # 分离的队列系统实现真正并行
         self.out_queue: Queue[AttnOut] = Queue()
         self.gpu2cpu_queue: Queue[IOTask] = Queue()  # GPU→CPU移动队列
@@ -1292,17 +1324,20 @@ class CPU2GPUThread:
 
         if_nonblcok = True
         # 移动注意力输出到GPU - 优化CPU到CPU拷贝
-        attn_cpu = self.pool.alloc_same_pin_tensor(move_attn_output)
+        # attn_cpu = self.pool.alloc_same_pin_tensor(move_attn_output)
         
         # 优化策略：使用最优拷贝方法（基于性能测试结果）
-        if move_attn_output.is_contiguous():
-            # 已经是连续内存，直接使用 non-blocking copy（最快）
-            attn_cpu.copy_(move_attn_output, non_blocking=if_nonblcok)
-        else:
-            # 非连续内存，先转换为连续再拷贝
-            move_attn_output = move_attn_output.contiguous()
-            attn_cpu.copy_(move_attn_output, non_blocking=if_nonblcok)
-        
+        # if move_attn_output.is_contiguous():
+        #     # 已经是连续内存，直接使用 non-blocking copy（最快）
+        #     # attn_cpu.copy_(move_attn_output, non_blocking=if_nonblcok)
+        #     pass
+        # else:
+        #     # 非连续内存，先转换为连续再拷贝
+        #     move_attn_output = move_attn_output.contiguous()
+            # attn_cpu.copy_(move_attn_output, non_blocking=if_nonblcok)
+        time_start_pin = time.time()
+        attn_cpu = move_attn_output.pin_memory()
+        logger.debug(f"Pin memory cost {time.time()-time_start_pin:.6f} seconds")
         attn_output = attn_cpu.to(device=self.device, non_blocking=if_nonblcok)
         
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -1313,9 +1348,9 @@ class CPU2GPUThread:
         )
 
         # 等待GPU拷贝完成
-        gpu_copy_event = torch.cuda.Event(blocking=True)
-        gpu_copy_event.record(stream=self.io_stream)
-        gpu_copy_event.wait(stream=self.io_stream)
+        # gpu_copy_event = torch.cuda.Event(blocking=True)
+        # gpu_copy_event.record(stream=self.io_stream)
+        # gpu_copy_event.wait(stream=self.io_stream)
         
         logger.debug(f"CPU2GPU move cost {time.time()-time_start:.6f} seconds")
         
@@ -1330,7 +1365,8 @@ class CPU2GPUThread:
         self.output_queue.put(attn_out)
         
         # 清理内存
-        self.pool.free(attn_cpu)
+
+        # self.pool.free(attn_cpu)
         query_states = attn_inputs.query_states
         sin = attn_inputs.sin
         cos = attn_inputs.cos

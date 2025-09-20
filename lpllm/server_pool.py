@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from sllm_store.client import SllmStoreClient
 from lpllm.logger import init_logger
 from lpllm.cuda_memcpy_utils import cuda_copy_, safe_copy_
-
+import time
 logger = init_logger(__name__)
 
 
@@ -111,17 +111,20 @@ class ServerPinnedMemoryPool:
                     )
                     # Create tensor from storage as uint8 (raw bytes)
                     self.shared_memory_tensor = torch.tensor(storage, dtype=torch.uint8)
+                    time_start_pin = time.time()
+                    self.shared_memory_tensor.pin_memory()
+                    logger.info(f"Pin memory cost {time.time()-time_start_pin:.6f} seconds")
+                    if self.shared_memory_tensor.is_pinned():
+                        logger.info(f"Shared memory tensor is pinned")
+                    else:
+                        logger.info(f"Shared memory tensor is not pinned")
                     logger.info(f"Successfully created shared memory tensor from handle: {handle_tuple}")
                     logger.info(f"Shared memory tensor shape: {self.shared_memory_tensor.shape}, "
                               f"size: {self.shared_memory_tensor.numel()} bytes")
                 except Exception as e:
                     logger.warning(f"Failed to create shared memory tensor: {e}")
                     # Fallback to local pinned memory
-                    self.shared_memory_tensor = torch.empty(
-                        self.server_memory_size,
-                        dtype=torch.uint8,
-                        pin_memory=True
-                    )
+                    raise RuntimeError(f"Failed to create shared memory tensor: {e}")
             else:
                 raise RuntimeError("No shared memory handle received from server")
             
@@ -162,6 +165,10 @@ class ServerPinnedMemoryPool:
                 # Convert bytes to target dtype
                 tensor = shared_slice.view(self.dtype).view(shape)
             
+            if tensor.is_pinned():
+                logger.info(f"Tensor is pinned")
+            else:
+                logger.info(f"Tensor is not pinned")
             logger.debug(f"Created tensor from shared memory at offset={start_offset}, "
                         f"elements={num_elements}, shape={shape}, dtype={self.dtype}")
             
@@ -169,7 +176,14 @@ class ServerPinnedMemoryPool:
         except Exception as e:
             logger.error(f"Failed to create tensor from shared memory: {e}")
             # Fallback to local allocation
-            return torch.empty(shape, dtype=self.dtype, pin_memory=True)
+            fallback_tensor = torch.empty(shape, dtype=self.dtype, pin_memory=True)
+            if fallback_tensor.is_pinned():
+                logger.info(f"Fallback tensor is pinned")
+            else:
+                logger.info(f"Fallback tensor is not pinned")
+            logger.debug(f"Using fallback local pinned tensor: {fallback_tensor.shape}, "
+                        f"pinned: {fallback_tensor.is_pinned()}")
+            return fallback_tensor
     
     def alloc_same_pin_tensor(self, tensor: torch.Tensor):
         """Allocate memory block matching given tensor shape and type, return tensor directly"""
@@ -230,7 +244,10 @@ class ServerPinnedMemoryPool:
             except Exception as e:
                 logger.error(f"Failed to create tensor from shared memory: {e}")
                 # Fallback to local pinned memory
-                return torch.empty(tensor.shape, dtype=tensor.dtype, pin_memory=True)
+                fallback_tensor = torch.empty(tensor.shape, dtype=tensor.dtype, pin_memory=True)
+                logger.debug(f"Using fallback local pinned tensor for allocation: {fallback_tensor.shape}, "
+                            f"pinned: {fallback_tensor.is_pinned()}")
+                return fallback_tensor
     
    
     

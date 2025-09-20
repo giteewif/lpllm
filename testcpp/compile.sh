@@ -1,1 +1,0 @@
-nvcc transfer.cpp -o transfer -O3 && ./transfer

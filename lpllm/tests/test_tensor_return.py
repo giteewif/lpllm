@@ -37,7 +37,8 @@ def test_tensor_return():
         print(f"  - Is tensor: {torch.is_tensor(allocated_tensor)}")
         print(f"  - Has server pool info: {hasattr(allocated_tensor, '_server_pool_info')}")
         
-        
+        if not allocated_tensor.is_pinned():
+            raise ValueError(f"Error should not allocate right")
         # Test tensor operations
         allocated_tensor.copy_(test_tensor)
         # print(allocated_tensor)

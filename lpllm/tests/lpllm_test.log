@@ -1,0 +1,123 @@
+DEBUG 09-20 12:49:31 client.py:72] load_into_gpu: deepseek-moe-16b-base, 512727a0-70cc-444d-92d6-48f5b8cdc6d2
+INFO 09-20 12:49:31 client.py:113] Model loaded: deepseek-moe-16b-base, 512727a0-70cc-444d-92d6-48f5b8cdc6d2
+INFO 09-20 12:49:32 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 512727a0-70cc-444d-92d6-48f5b8cdc6d2
+INFO 09-20 12:49:32 client.py:125] Model loaded
+DEBUG 09-20 12:49:32 client.py:72] load_into_gpu: deepseek-moe-16b-base, e6863b47-75bb-40ab-92c9-4ada09748a19
+INFO 09-20 12:49:32 client.py:113] Model loaded: deepseek-moe-16b-base, e6863b47-75bb-40ab-92c9-4ada09748a19
+INFO 09-20 12:49:32 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, e6863b47-75bb-40ab-92c9-4ada09748a19
+INFO 09-20 12:49:32 client.py:125] Model loaded
+DEBUG 09-20 12:49:32 client.py:72] load_into_gpu: deepseek-moe-16b-base, a3c46dac-919c-40d1-9db0-df815106ee6d
+INFO 09-20 12:49:32 client.py:113] Model loaded: deepseek-moe-16b-base, a3c46dac-919c-40d1-9db0-df815106ee6d
+INFO 09-20 12:49:32 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, a3c46dac-919c-40d1-9db0-df815106ee6d
+INFO 09-20 12:49:32 client.py:125] Model loaded
+INFO 09-20 12:50:03 lpllm.py:1232] CPU compute thread started, id 3151411
+DEBUG 09-20 12:50:04 client.py:72] load_into_gpu: deepseek-moe-16b-base, a8565462-4d15-4c86-9f25-f3327dd0e622
+INFO 09-20 12:50:04 client.py:113] Model loaded: deepseek-moe-16b-base, a8565462-4d15-4c86-9f25-f3327dd0e622
+INFO 09-20 12:50:04 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, a8565462-4d15-4c86-9f25-f3327dd0e622
+INFO 09-20 12:50:04 client.py:125] Model loaded
+DEBUG 09-20 12:50:04 client.py:72] load_into_gpu: deepseek-moe-16b-base, 024e1fb5-3bcf-43f7-9ff4-af97aaa583a1
+INFO 09-20 12:50:04 client.py:113] Model loaded: deepseek-moe-16b-base, 024e1fb5-3bcf-43f7-9ff4-af97aaa583a1
+INFO 09-20 12:50:05 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 024e1fb5-3bcf-43f7-9ff4-af97aaa583a1
+INFO 09-20 12:50:05 client.py:125] Model loaded
+DEBUG 09-20 12:50:05 client.py:72] load_into_gpu: deepseek-moe-16b-base, 83797425-44cc-4a97-9f7c-a46e99b6d3a2
+INFO 09-20 12:50:05 client.py:113] Model loaded: deepseek-moe-16b-base, 83797425-44cc-4a97-9f7c-a46e99b6d3a2
+INFO 09-20 12:50:05 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 83797425-44cc-4a97-9f7c-a46e99b6d3a2
+INFO 09-20 12:50:05 client.py:125] Model loaded
+DEBUG 09-20 12:50:05 client.py:72] load_into_gpu: deepseek-moe-16b-base, 251637fd-8d09-426c-ba63-e35d8cfda575
+INFO 09-20 12:50:05 client.py:113] Model loaded: deepseek-moe-16b-base, 251637fd-8d09-426c-ba63-e35d8cfda575
+INFO 09-20 12:50:06 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 251637fd-8d09-426c-ba63-e35d8cfda575
+INFO 09-20 12:50:06 client.py:125] Model loaded
+DEBUG 09-20 12:50:06 client.py:72] load_into_gpu: deepseek-moe-16b-base, db56fee5-b962-4cb2-95c2-1e994b69604c
+INFO 09-20 12:50:06 client.py:113] Model loaded: deepseek-moe-16b-base, db56fee5-b962-4cb2-95c2-1e994b69604c
+INFO 09-20 12:50:06 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, db56fee5-b962-4cb2-95c2-1e994b69604c
+INFO 09-20 12:50:06 client.py:125] Model loaded
+DEBUG 09-20 12:50:06 client.py:72] load_into_gpu: deepseek-moe-16b-base, 2920d1cb-2517-4c53-8ec1-be51e9292583
+INFO 09-20 12:50:06 client.py:113] Model loaded: deepseek-moe-16b-base, 2920d1cb-2517-4c53-8ec1-be51e9292583
+INFO 09-20 12:50:06 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 2920d1cb-2517-4c53-8ec1-be51e9292583
+INFO 09-20 12:50:06 client.py:125] Model loaded
+DEBUG 09-20 12:50:06 client.py:72] load_into_gpu: deepseek-moe-16b-base, 334bca35-e85d-4201-86db-d35094bd7faa
+INFO 09-20 12:50:06 client.py:113] Model loaded: deepseek-moe-16b-base, 334bca35-e85d-4201-86db-d35094bd7faa
+INFO 09-20 12:50:07 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 334bca35-e85d-4201-86db-d35094bd7faa
+INFO 09-20 12:50:07 client.py:125] Model loaded
+DEBUG 09-20 12:50:07 client.py:72] load_into_gpu: deepseek-moe-16b-base, 19bcad9c-0780-4111-a832-f57e429e7d70
+INFO 09-20 12:50:07 client.py:113] Model loaded: deepseek-moe-16b-base, 19bcad9c-0780-4111-a832-f57e429e7d70
+INFO 09-20 12:50:07 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 19bcad9c-0780-4111-a832-f57e429e7d70
+INFO 09-20 12:50:07 client.py:125] Model loaded
+DEBUG 09-20 12:50:07 client.py:72] load_into_gpu: deepseek-moe-16b-base, 00a73384-e939-4a3a-a986-2c997f7a8566
+INFO 09-20 12:50:07 client.py:113] Model loaded: deepseek-moe-16b-base, 00a73384-e939-4a3a-a986-2c997f7a8566
+INFO 09-20 12:50:07 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 00a73384-e939-4a3a-a986-2c997f7a8566
+INFO 09-20 12:50:07 client.py:125] Model loaded
+DEBUG 09-20 12:50:07 client.py:72] load_into_gpu: deepseek-moe-16b-base, a0104811-23d6-46ba-9450-b88d532c6fa4
+INFO 09-20 12:50:07 client.py:113] Model loaded: deepseek-moe-16b-base, a0104811-23d6-46ba-9450-b88d532c6fa4
+INFO 09-20 12:50:08 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, a0104811-23d6-46ba-9450-b88d532c6fa4
+INFO 09-20 12:50:08 client.py:125] Model loaded
+DEBUG 09-20 12:50:08 client.py:72] load_into_gpu: deepseek-moe-16b-base, 6454d8f2-8690-4b19-98b1-2eb5278dc953
+INFO 09-20 12:50:08 client.py:113] Model loaded: deepseek-moe-16b-base, 6454d8f2-8690-4b19-98b1-2eb5278dc953
+INFO 09-20 12:50:08 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 6454d8f2-8690-4b19-98b1-2eb5278dc953
+INFO 09-20 12:50:08 client.py:125] Model loaded
+DEBUG 09-20 12:50:08 client.py:72] load_into_gpu: deepseek-moe-16b-base, 27b32add-a9d9-484e-b0c3-5efefc9cf51d
+INFO 09-20 12:50:08 client.py:113] Model loaded: deepseek-moe-16b-base, 27b32add-a9d9-484e-b0c3-5efefc9cf51d
+INFO 09-20 12:50:08 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 27b32add-a9d9-484e-b0c3-5efefc9cf51d
+INFO 09-20 12:50:08 client.py:125] Model loaded
+DEBUG 09-20 12:50:08 client.py:72] load_into_gpu: deepseek-moe-16b-base, 4032d556-598b-4561-ad5f-439c1574ed9f
+INFO 09-20 12:50:08 client.py:113] Model loaded: deepseek-moe-16b-base, 4032d556-598b-4561-ad5f-439c1574ed9f
+INFO 09-20 12:50:09 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 4032d556-598b-4561-ad5f-439c1574ed9f
+INFO 09-20 12:50:09 client.py:125] Model loaded
+DEBUG 09-20 12:50:09 client.py:72] load_into_gpu: deepseek-moe-16b-base, 307ab249-3e31-475b-8e24-bcfb1e16ad27
+INFO 09-20 12:50:09 client.py:113] Model loaded: deepseek-moe-16b-base, 307ab249-3e31-475b-8e24-bcfb1e16ad27
+INFO 09-20 12:50:09 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 307ab249-3e31-475b-8e24-bcfb1e16ad27
+INFO 09-20 12:50:09 client.py:125] Model loaded
+DEBUG 09-20 12:50:09 client.py:72] load_into_gpu: deepseek-moe-16b-base, 6ee9ff72-56b8-4d0b-a8e5-89e2d9f34aba
+INFO 09-20 12:50:09 client.py:113] Model loaded: deepseek-moe-16b-base, 6ee9ff72-56b8-4d0b-a8e5-89e2d9f34aba
+INFO 09-20 12:50:09 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 6ee9ff72-56b8-4d0b-a8e5-89e2d9f34aba
+INFO 09-20 12:50:09 client.py:125] Model loaded
+DEBUG 09-20 12:50:09 client.py:72] load_into_gpu: deepseek-moe-16b-base, 1f3c7ec5-21a1-49d2-b22d-453bd5776ac0
+INFO 09-20 12:50:09 client.py:113] Model loaded: deepseek-moe-16b-base, 1f3c7ec5-21a1-49d2-b22d-453bd5776ac0
+INFO 09-20 12:50:10 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 1f3c7ec5-21a1-49d2-b22d-453bd5776ac0
+INFO 09-20 12:50:10 client.py:125] Model loaded
+DEBUG 09-20 12:50:10 client.py:72] load_into_gpu: deepseek-moe-16b-base, 8eefd4fb-df8f-4b9a-ae40-3daad8a115ec
+INFO 09-20 12:50:10 client.py:113] Model loaded: deepseek-moe-16b-base, 8eefd4fb-df8f-4b9a-ae40-3daad8a115ec
+INFO 09-20 12:50:10 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 8eefd4fb-df8f-4b9a-ae40-3daad8a115ec
+INFO 09-20 12:50:10 client.py:125] Model loaded
+DEBUG 09-20 12:50:10 client.py:72] load_into_gpu: deepseek-moe-16b-base, 4e8cc9e9-d0e3-40f8-b632-c1b1c369d3d0
+INFO 09-20 12:50:10 client.py:113] Model loaded: deepseek-moe-16b-base, 4e8cc9e9-d0e3-40f8-b632-c1b1c369d3d0
+INFO 09-20 12:50:10 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 4e8cc9e9-d0e3-40f8-b632-c1b1c369d3d0
+INFO 09-20 12:50:10 client.py:125] Model loaded
+DEBUG 09-20 12:50:10 client.py:72] load_into_gpu: deepseek-moe-16b-base, a6a09366-5aea-4a19-8259-688a722d4894
+INFO 09-20 12:50:10 client.py:113] Model loaded: deepseek-moe-16b-base, a6a09366-5aea-4a19-8259-688a722d4894
+INFO 09-20 12:50:11 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, a6a09366-5aea-4a19-8259-688a722d4894
+INFO 09-20 12:50:11 client.py:125] Model loaded
+DEBUG 09-20 12:50:11 client.py:72] load_into_gpu: deepseek-moe-16b-base, fff28002-4543-4890-a5ec-6bd04205d377
+INFO 09-20 12:50:11 client.py:113] Model loaded: deepseek-moe-16b-base, fff28002-4543-4890-a5ec-6bd04205d377
+INFO 09-20 12:50:11 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, fff28002-4543-4890-a5ec-6bd04205d377
+INFO 09-20 12:50:11 client.py:125] Model loaded
+DEBUG 09-20 12:50:11 client.py:72] load_into_gpu: deepseek-moe-16b-base, 235d1d02-1130-46d9-bffb-4b6595ff5efa
+INFO 09-20 12:50:11 client.py:113] Model loaded: deepseek-moe-16b-base, 235d1d02-1130-46d9-bffb-4b6595ff5efa
+INFO 09-20 12:50:11 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 235d1d02-1130-46d9-bffb-4b6595ff5efa
+INFO 09-20 12:50:11 client.py:125] Model loaded
+DEBUG 09-20 12:50:11 client.py:72] load_into_gpu: deepseek-moe-16b-base, 6710817f-b658-4bca-ac5c-ce71b8538678
+INFO 09-20 12:50:11 client.py:113] Model loaded: deepseek-moe-16b-base, 6710817f-b658-4bca-ac5c-ce71b8538678
+INFO 09-20 12:50:12 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 6710817f-b658-4bca-ac5c-ce71b8538678
+INFO 09-20 12:50:12 client.py:125] Model loaded
+DEBUG 09-20 12:50:12 client.py:72] load_into_gpu: deepseek-moe-16b-base, b110b3f7-083c-4285-a301-e5348c142251
+INFO 09-20 12:50:12 client.py:113] Model loaded: deepseek-moe-16b-base, b110b3f7-083c-4285-a301-e5348c142251
+INFO 09-20 12:50:12 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, b110b3f7-083c-4285-a301-e5348c142251
+INFO 09-20 12:50:12 client.py:125] Model loaded
+DEBUG 09-20 12:50:12 client.py:72] load_into_gpu: deepseek-moe-16b-base, 593f81cd-4e69-4b35-b350-52bc1e52ba20
+INFO 09-20 12:50:12 client.py:113] Model loaded: deepseek-moe-16b-base, 593f81cd-4e69-4b35-b350-52bc1e52ba20
+INFO 09-20 12:50:12 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 593f81cd-4e69-4b35-b350-52bc1e52ba20
+INFO 09-20 12:50:12 client.py:125] Model loaded
+DEBUG 09-20 12:50:12 client.py:72] load_into_gpu: deepseek-moe-16b-base, dda6cf39-7619-4c01-a2d5-01181398c8be
+INFO 09-20 12:50:12 client.py:113] Model loaded: deepseek-moe-16b-base, dda6cf39-7619-4c01-a2d5-01181398c8be
+INFO 09-20 12:50:13 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, dda6cf39-7619-4c01-a2d5-01181398c8be
+INFO 09-20 12:50:13 client.py:125] Model loaded
+DEBUG 09-20 12:50:13 client.py:72] load_into_gpu: deepseek-moe-16b-base, 29681bca-da5c-4ecd-b5e0-5707953a3603
+INFO 09-20 12:50:13 client.py:113] Model loaded: deepseek-moe-16b-base, 29681bca-da5c-4ecd-b5e0-5707953a3603
+INFO 09-20 12:50:13 client.py:117] confirm_model_loaded: deepseek-moe-16b-base, 29681bca-da5c-4ecd-b5e0-5707953a3603
+INFO 09-20 12:50:13 client.py:125] Model loaded
+torch.Size([360, 512, 2048])
+Collecting data...
+Generating '/tmp/nsys-report-a81e.qdstrm'
+[1/1] [0%                          ] report6.nsys-rep[1/1] [0%                          ] report6.nsys-rep[1/1] [9%                          ] report6.nsys-rep[1/1] [==20%                       ] report6.nsys-rep[1/1] [=====32%                    ] report6.nsys-rep[1/1] [=========44%                ] report6.nsys-rep[1/1] [============56%             ] report6.nsys-rep[1/1] [================68%         ] report6.nsys-rep[1/1] [================71%         ] report6.nsys-rep[1/1] [========================100%] report6.nsys-rep[1/1] [========================100%] report6.nsys-rep
+Generated:
+	/mnt/zhengcf3/lpllm/lpllm/tests/report6.nsys-rep
