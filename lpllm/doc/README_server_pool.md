@@ -1,5 +1,5 @@
 # ServerPinnedMemoryPool 实现说明
-sllm-store start --storage-path /mnt/zhengcf3/models/models --mem-pool-size 40GB
+sllm-store start --storage-path /mnt/zhengcf3/models/models --mem-pool-size 140GB
 ## 概述
 
 本实现将原有的 `pool_memory` 改为使用 server 端额外申请的空间作为 pool memory。

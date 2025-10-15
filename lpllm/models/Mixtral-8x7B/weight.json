@@ -1,0 +1,12 @@
+{ 
+   "single w": "112MB",
+   "single expert weights": "336MB",
+   "layer": "2688MB",
+   "(360,512,4096)": "1440MB",
+   "qkvo_proj":"(qo16*2 32MB, kv 4*2 8MB)40MB",
+   "8x22b single w":"192MB",
+   "8x22b single expert weights":"576MB",
+   "8x22b layer":"4608MB",
+   "8x22b (360,512,6144)":"1800MB",
+   "8x22b qkvo_proj":"(qo32*2 64MB, kv 6*2 12MB)76MB"
+}

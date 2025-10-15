@@ -64,8 +64,8 @@ class StorageServicer(storage_pb2_grpc.StorageServicer):
         self.allocated_blocks = {}  # Maps allocation_id -> (start_offset, size)
         self.next_allocation_id = 0
         
-        # Pre-allocate large contiguous pinned memory
-        self._pre_allocate_memory()
+        # Pre-allocate large contiguous pinned memory, do not use now, in lpllm 
+        # self._pre_allocate_memory()
 
     def _pre_allocate_memory(self):
         """Pre-allocate a large contiguous shared pinned memory block on server startup"""

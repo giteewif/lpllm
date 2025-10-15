@@ -159,7 +159,6 @@ int CheckpointStore::LoadModelFromDisk(const std::string& model_path) {
   lock_info.unlock();
 
   int ret = model->ToHost(num_thread_);
-
   if (ret != 0) {
     LOG(ERROR) << "Failed to load model " << model_path << " to host";
     if (model->FreeHost() != 0) {
@@ -228,9 +227,14 @@ int CheckpointStore::LoadModelFromMem(
   // Convert memory handles to device pointers
   auto device_ptrs = GetDevicePtrsFromMemHandles(gpu_memory_handles);
 
+  auto time_start = std::chrono::system_clock::now();
   auto ret = model->ToGpu(replica_uuid, device_ptrs, converted_mem_copy_chunks,
                           converted_mem_copy_handles);
-
+  LOG(INFO) << "Load model once" << model_path << " to gpu cost "
+            << std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now() - time_start)
+                    .count()
+            << " seconds";
   // TODO: check if the model is loaded successfully
   if (ret != 0) {
     LOG(ERROR) << "Failed to load model " << model_path << " to GPU";
