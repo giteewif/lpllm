@@ -250,6 +250,10 @@ class LPLLM():
         layers_tensor_data_index = {}
         other_tensor_meta_index = {}
         other_tensor_data_index = {}
+        layers_attention_meta_index = {}
+        layers_attention_data_index = {}
+        layers_mlp_meta_index = {}
+        layers_mlp_data_index = {}
         for name, (offset, size, shape, stride, dtype) in tensor_index.items():
             # for layer
             if name.startswith(layer_attr_name):
@@ -346,7 +350,9 @@ class LPLLM():
             self.attn_manager.cpu_compute_thread.thread,
             self.attn_manager.cpu2gpu_thread.thread
         ])
-    
+    def load_attention_weight(self):
+        pass
+
     def _setup_signal_handlers(self):
         """设置信号处理器，确保进程异常退出时能清理资源"""
         def signal_handler(signum, frame):
@@ -607,49 +613,7 @@ class LPLLM():
             logger.debug(f"chunk_batch_size: {chunk_batch_size} hidden_states_chunk_example shape and value: {hidden_states_chunk_example.shape}")
             logger.debug(f"attention_mask shape and value: {attention_mask}")
             del hidden_states_chunk_example
-            # encoder first
-            layer_output_list = []
-            for i in range(len(hidden_states_ids_decoders_chunks_list)):
-                hidden_states_ids_chunks1, hidden_states_ids_chunks2 = hidden_states_ids_decoders_chunks_list[i]
-
-                hidden_states_chunks1 = []
-                hidden_states_chunks2 = []
-                for i in range(len(hidden_states_ids_chunks1)):
-                    hidden_states_chunks1_element = embed_tokens(hidden_states_ids_chunks1[i])
-                    hidden_states_chunks2_element = embed_tokens(hidden_states_ids_chunks2[i])
-                    hidden_states_chunks1.append(hidden_states_chunks1_element)
-                    hidden_states_chunks2.append(hidden_states_chunks2_element)
-
-                time_start_decoders_batch = time.time()
-                layer_output = self.decoders_batch(
-                    hidden_states_chunks1=hidden_states_chunks1,
-                    hidden_states_chunks2=hidden_states_chunks2,
-                    past_key_values=past_key_values,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                )
-                logger.debug(f"decoders batch for {i} cost {time.time() - time_start_decoders_batch} s")
-
-                log_cuda_memory_usage(device=input_ids.device, step_name=f"decoders batch for {i}")
-                assert layer_output.shape[:2] == orig_shape, f"layer_output shape {layer_output.shape} does not match input hidden shape in any {orig_shape}"
-                # time_start=time.time()
-                # torch.cuda.empty_cache()
-                # logger.debug(f"empty_torch cache cost {time.time() - time_start} s")
-                layer_output_list.append(layer_output)
-            
-            layer_output = torch.cat(layer_output_list, dim=0)
-
-            # 显式删除不再需要的对象以释放显存
-            del layer_output_list
-
-            layer_output_batch_size, seq_length = layer_output.shape[:2]
-            assert layer_output_batch_size == input_batch_size, f"layer_output_batch_size {layer_output_batch_size} does not match batch_size {input_batch_size}"
-            assert layer_output_batch_size % 2 == 0, f"layer_output_batch_size {layer_output_batch_size} must be even"
-            half = layer_output_batch_size // 2
-            layer_output1 = layer_output[:half]
-            layer_output2 = layer_output[half:]
-            assert layer_output1.shape == layer_output2.shape, f"layer_output1 shape {layer_output1.shape} does not match layer_output2 shape {layer_output2.shape}"
-
+            # 定义get_next_token函数，避免重复定义
             norm = self.lpmodule_class_instance.model.norm
             lm_head = self.lpmodule_class_instance.lm_head
             @torch.no_grad()
@@ -713,15 +677,68 @@ class LPLLM():
                 next_token_ids = next_token_ids.unsqueeze(1)  # Shape: (batch_size, 1)
                 return next_token_ids
 
+            # 初始化存储生成的tokens
             generated_tokens1 = []
             generated_tokens2 = []
+            
+            # encoder first - 处理每个chunk并立即生成token
+            for i in range(len(hidden_states_ids_decoders_chunks_list)):
+                hidden_states_ids_chunks1, hidden_states_ids_chunks2 = hidden_states_ids_decoders_chunks_list[i]
 
-            next_token_ids1 = get_next_token(layer_output1)
-            next_token_ids2 = get_next_token(layer_output2)
+                hidden_states_chunks1 = []
+                hidden_states_chunks2 = []
+                for j in range(len(hidden_states_ids_chunks1)):
+                    hidden_states_chunks1_element = embed_tokens(hidden_states_ids_chunks1[j])
+                    hidden_states_chunks2_element = embed_tokens(hidden_states_ids_chunks2[j])
+                    hidden_states_chunks1.append(hidden_states_chunks1_element)
+                    hidden_states_chunks2.append(hidden_states_chunks2_element)
+
+                time_start_decoders_batch = time.time()
+                layer_output_chunk = self.decoders_batch(
+                    hidden_states_chunks1=hidden_states_chunks1,
+                    hidden_states_chunks2=hidden_states_chunks2,
+                    past_key_values=past_key_values,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                )
+                logger.debug(f"decoders batch cost for {i} cost {time.time() - time_start_decoders_batch} s")
+
+                log_cuda_memory_usage(device=input_ids.device, step_name=f"decoders batch for {i}")
+                assert layer_output_chunk.shape[:2] == orig_shape, f"layer_output_chunk shape {layer_output_chunk.shape} does not match input hidden shape in any {orig_shape}"
+                
+                # 立即处理layer_output_chunk，而不是累积
+                layer_output_chunk_batch_size, seq_length = layer_output_chunk.shape[:2]
+                assert layer_output_chunk_batch_size % 2 == 0, f"layer_output_chunk_batch_size {layer_output_chunk_batch_size} must be even"
+                half = layer_output_chunk_batch_size // 2
+                layer_output_chunk1 = layer_output_chunk[:half]
+                layer_output_chunk2 = layer_output_chunk[half:]
+                assert layer_output_chunk1.shape == layer_output_chunk2.shape, f"layer_output_chunk1 shape {layer_output_chunk1.shape} does not match layer_output_chunk2 shape {layer_output_chunk2.shape}"
+
+                # 立即生成token
+                next_token_ids1_chunk = get_next_token(layer_output_chunk1)
+                next_token_ids2_chunk = get_next_token(layer_output_chunk2)
+                
+                # 存储生成的tokens
+                generated_tokens1.append(next_token_ids1_chunk)
+                generated_tokens2.append(next_token_ids2_chunk)
+                
+                # 显式删除不再需要的对象以释放显存
+                del layer_output_chunk, layer_output_chunk1, layer_output_chunk2
+                del hidden_states_chunks1, hidden_states_chunks2
+                torch.cuda.empty_cache()
+            
+            # 整合所有生成的tokens
+            next_token_ids1 = torch.cat(generated_tokens1, dim=0)
+            next_token_ids2 = torch.cat(generated_tokens2, dim=0)
             logger.debug(f"next_token_ids shape {next_token_ids1.shape}")
-
-            generated_tokens1.append(next_token_ids1)
-            generated_tokens2.append(next_token_ids2)
+            
+            # 清空临时存储
+            generated_tokens1.clear()
+            generated_tokens2.clear()
+            
+            # 重新初始化用于后续步骤
+            generated_tokens1 = [next_token_ids1]
+            generated_tokens2 = [next_token_ids2]
 
             # decoder next
             self.sync()
@@ -809,14 +826,23 @@ class LPLLM():
 
                 generated_tokens1.append(next_token_ids1)
                 generated_tokens2.append(next_token_ids2)
+                
+                # 立即清理不需要的tensor以释放显存
+                del layer_output1, layer_output2
+                del input_embeds1, input_embeds2
+                torch.cuda.empty_cache()
             
-            generated_tokens = input_ids
+            # 整合所有生成的tokens
             generated_new_tokens = torch.tensor([], dtype=torch.long, device=input_ids.device)
             for next_token_ids1, next_token_ids2 in zip(generated_tokens1, generated_tokens2):
                 generated_new_tokens_step = torch.cat([next_token_ids1, next_token_ids2], dim=0)
                 generated_new_tokens = torch.cat([generated_new_tokens, generated_new_tokens_step], dim=1)
                 logger.debug(f"input_ids shape {input_ids.shape} generted_new_tokens.shape {generated_new_tokens.shape}")
-                generated_tokens = torch.cat([generated_tokens, generated_new_tokens_step], dim=1)
+            generated_tokens = torch.cat([input_ids, generated_new_tokens], dim=1)
+            # 清理临时存储
+            generated_tokens1.clear()
+            generated_tokens2.clear()
+            torch.cuda.empty_cache()
         except Exception as e:
             logger.error(f"Error during generation at step {step + 1}: {e}")
             logger.error(f"Exception type: {type(e).__name__}")

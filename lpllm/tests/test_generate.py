@@ -36,8 +36,8 @@ config = lp.config
 
 tokenizer=AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-# 60, 120, 240, 480, 960
-batch_size = 720
+# 60, 120, 240, 360, 480, 720, 960, 1440, 1920
+batch_size = 1920
 seq_len = 512
 vocab_size = config.vocab_size
 # 随机可能导致nan值
@@ -76,7 +76,7 @@ print(f"当前程序内存占用: {mem_used_mb:.2f} MB")
 # print(f"get seq_length {past_key_values1.get_seq_length(0)} max {past_key_values1.get_max_cache_shape()}")
 
 time_start = time.time()
-generated_tokens, generated_new_tokens = lp.generate_batch(input_ids, past_key_values1, encoder_batch_size=180, gpu_batch_size=1, max_new_tokens=32)
+generated_tokens, generated_new_tokens = lp.generate_batch(input_ids, past_key_values1, encoder_batch_size=192, gpu_batch_size=1, max_new_tokens=32)
 torch.cuda.synchronize()
 elapsed = time.time() - time_start
 print(f"generate cost {elapsed} s")
@@ -89,3 +89,4 @@ print(f"Token throughput: {throughput:.2f} tokens/s")
 # result = tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
 # print(result)
 lp.stop()
+ 
